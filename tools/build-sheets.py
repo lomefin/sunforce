@@ -61,11 +61,12 @@ SOFT_HITSTUN, HARD_HITSTUN = 16, 21
 # early rather than the drawing running out under a blocked kick.
 BLOCKSTUN = 14
 # THE IDLE BREATH, in sim frames for one full cycle. A fighting game's rest pose
-# is never still; a second per loop is slow enough to read as breathing and fast
-# enough not to look like a stutter. Shared out over however many drawings the
-# costume has, so adding a fifth pose makes each one shorter, not the loop
-# longer — the character keeps breathing at the same rate.
-IDLE_CYCLE = 60
+# is never still. A full second read as sluggish on four drawings, so this is
+# two thirds of one: brisk enough to look alive, slow enough not to jitter.
+# Shared out over however many drawings the costume has, so adding a fifth pose
+# makes each one shorter, not the loop longer — the character keeps breathing at
+# the same rate. Four drawings at 10 frames each today.
+IDLE_CYCLE = 40
 
 # A frame file is <costume>-<clip>.png or <costume>-<clip>-<n>.png, and the clip
 # part is words only. 'hard-hit-2' is frame 2 of hard-hit; 'hard-hit02' is a typo

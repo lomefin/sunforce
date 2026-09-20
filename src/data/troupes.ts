@@ -69,6 +69,23 @@ export interface TroupeTheme {
    * move a wall or desync anything: see `stageForTroupe`.
    */
   readonly backdrop?: string;
+  /**
+   * World units to RAISE this troupe's panorama, so its painted ground meets
+   * the line the fighters actually stand on (world y = 0).
+   *
+   * Every painting puts its ground somewhere different. STAGE_1's layer is
+   * placed for the Caporal pier deck, 0.73 of the way down that image; a
+   * painting with a deeper foreground has its ground lower, which leaves the
+   * fighters hanging in the air above it. Raising the quad by the difference
+   * brings the two together.
+   *
+   * THE CONVERSION: the panorama is 1400 world units tall over 724 source
+   * pixels, so one source pixel is 1.93 units and shifting by a fraction `f`
+   * of the image is `f * 1400`. The camera needs 900 units of art above the
+   * ground line and 170 below, which bounds the effective ground fraction to
+   * roughly 0.64..0.88 — i.e. this shift to about -125..+210.
+   */
+  readonly backdropShiftY?: number;
 }
 
 /**
@@ -96,6 +113,10 @@ export const TROUPE_THEMES: readonly TroupeTheme[] = [
     musicId: 'stage-tinku',
     goAtMs: DEFAULT_GO_AT_MS,
     backdrop: 'stages/stage-tinku.png',
+    // The altiplano has a deep foreground: its ground sits at about 0.80 of the
+    // way down the image against the pier's 0.73, so the fighters stood ~98
+    // units above the dry grass. 1400 * (0.80 - 0.73).
+    backdropShiftY: 98,
   },
   // Six seconds in: this recording opens long, and the countdown waits for it.
   {
@@ -143,5 +164,10 @@ export const stageForTroupe = (base: StageDef, theme: TroupeTheme | null): Stage
   if (art === undefined || art === '') return base;
   const first = base.layers[0];
   if (first === undefined) return base;
-  return { ...base, layers: [{ ...first, texture: art }, ...base.layers.slice(1)] };
+  // `yOffset` is the panorama quad's centre, and gfx/stage.ts derives the
+  // effective ground fraction straight back out of it — so moving the centre IS
+  // moving the ground line. Nothing else about the layer changes.
+  const shift = theme?.backdropShiftY ?? 0;
+  const panorama = { ...first, texture: art, yOffset: first.yOffset + shift };
+  return { ...base, layers: [panorama, ...base.layers.slice(1)] };
 };

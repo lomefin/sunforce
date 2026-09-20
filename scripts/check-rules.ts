@@ -491,7 +491,27 @@ import { animOfState } from '../src/gfx/renderer';
   const L0 = stage1.layers[0]!;
   const D0 = dressed.layers[0]!;
   check('stage dressing: the layer keeps its parallax and scale',
-    D0.parallax === L0.parallax && D0.scale === L0.scale && D0.yOffset === L0.yOffset, true);
+    D0.parallax === L0.parallax && D0.scale === L0.scale, true);
+
+  // THE GROUND LINE. Each painting puts its ground somewhere different, and the
+  // only thing that moves is the quad's centre — gfx/stage.ts derives the
+  // effective ground fraction back out of exactly that number. A fighter
+  // standing above the painted floor is the bug this pins down.
+  const tinkuTheme = themeForOpponent(REGISTRY, CharId.C);
+  const tinkuStage = stageForTroupe(stage1, tinkuTheme);
+  check('ground: the tinku panorama is raised to meet the floor',
+    (tinkuStage.layers[0]?.yOffset ?? 0) - L0.yOffset, 98);
+  check('ground: caporal is not shifted at all',
+    plain.layers[0]?.yOffset, L0.yOffset);
+
+  // The camera needs 900 units of art above the ground line and 170 below, so a
+  // shift that looks right but starves the view is still wrong.
+  const BG_HEIGHT = 1400;
+  const okCoverage = TROUPE_THEMES.every((t) => {
+    const gv = (L0.yOffset + (t.backdropShiftY ?? 0) + BG_HEIGHT * 0.5) / BG_HEIGHT;
+    return gv * BG_HEIGHT >= 900 && (1 - gv) * BG_HEIGHT >= 170;
+  });
+  check('ground: every panorama still covers the camera', okCoverage, true);
 
   // THE HEADLINE NUMBERS, one per track: each track's GO must land exactly where
   // its recording says, and nowhere near where another's does.
@@ -597,10 +617,10 @@ import { animOfState } from '../src/gfx/renderer';
       // However many drawings, one full breath is the same length — so adding a
       // pose makes each shorter rather than slowing the character down.
       const cycle = idle.frames.reduce((n, f) => n + f.dur, 0);
-      if (cycle !== 60) bad += `${slot}:cycle=${cycle} `;
+      if (cycle !== 40) bad += `${slot}:cycle=${cycle} `;
       if (idle.frames.length > 1) looping++;
     }
-    check('idle: every IDLE clip loops on a 60-frame breath', bad.trim(), '');
+    check('idle: every IDLE clip loops on a 40-frame breath', bad.trim(), '');
     // The two Tinkus are the costumes with numbered neutrals drawn today.
     check('idle: the costumes with numbered neutrals actually animate',
       looping >= 2, true);
