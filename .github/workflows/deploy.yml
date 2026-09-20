@@ -1,0 +1,73 @@
+# Builds SunForce and publishes it to GitHub Pages.
+#
+# The one thing that makes this workflow non-obvious: `public/art/` is NOT in
+# git. It is generated from `assets/` by tools/build-sheets.py, which needs
+# Python and ImageMagick. Without the `npm run sheets` step below, `vite build`
+# still SUCCEEDS — it copies public/ verbatim rather than checking it — and
+# publishes a game that boots to a black screen with no fighters and no stage.
+#
+# Enable once at Settings -> Pages -> Build and deployment -> Source: GitHub
+# Actions. Until that is done this workflow runs green and deploys nothing.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish rather than cancelling it halfway; queue the next.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install ImageMagick
+        run: sudo apt-get update && sudo apt-get install -y imagemagick
+
+      - run: npm ci
+
+      # Sheets BEFORE verify, deliberately. Two of the checks assert things
+      # about the generated art — that every troupe's backdrop was staged, and
+      # that the idle clips loop — and they skip themselves when public/art is
+      # absent. Verifying first would quietly skip exactly the checks CI is
+      # best placed to run.
+      - name: Build the sprite atlases
+        run: npm run sheets
+
+      # The rules, headlessly, before anything is published. A build that
+      # deploys a broken fight is worse than one that fails.
+      - name: Verify
+        run: npm run verify
+
+      - name: Build
+        run: npm run build
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
