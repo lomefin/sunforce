@@ -6,6 +6,8 @@ import { charOf, createState } from '../src/sim/state';
 import { hurtBoxesOf } from '../src/sim/collision';
 import { step } from '../src/sim/step';
 import { REGISTRY } from '../src/data/registry';
+import { layoutText, measureText } from '../src/ui/font';
+import { MODE_TEXT_BOXES } from '../src/ui/mode';
 
 let failures = 0;
 const check = (label: string, got: unknown, want: unknown): void => {
@@ -291,6 +293,72 @@ import { animOfState } from '../src/gfx/renderer';
   // and 19 must sit strictly between them or the threshold is decorative.
   check('soft and hard are different clips', soft.clip !== hard.clip, true);
   check('19 separates light from heavy', soft.sum < 19 && hard.sum >= 19, true);
+}
+
+// =============================================================================
+// UI TEXT FITS ITS BOX
+// -----------------------------------------------------------------------------
+// The mode screen shipped two blurbs written as one line at size 20: 947px and
+// 929px of glyphs inside a 700px card with a 96px gap between the pair, so each
+// one printed ~120px of itself across its neighbour. Nothing caught it but a
+// screenshot, because `drawText` takes a size and an anchor and has no idea how
+// wide the panel behind it is.
+//
+// `drawTextBox` fixes that by taking the width as an argument, and these checks
+// make the fit a BUILD-TIME fact. They are pure arithmetic over the same font
+// metrics the renderer draws with — no GL, no canvas, no browser.
+{
+  // The primitive first: the box must actually bind, or the screen check below
+  // is measuring a promise nobody keeps.
+  const wrapped = layoutText('THE OPPONENT IS THE CPU ITS FIGHTER DRAWN AT RANDOM', {
+    size: 20, maxWidth: 632, maxLines: 2,
+  });
+  check('wrap: long blurb fits two lines', wrapped.lines.length, 2);
+  check('wrap: no line exceeds the box', wrapped.width <= 632, true);
+  check('wrap: nothing had to be sacrificed', wrapped.clipped, false);
+  check('wrap: every word survives',
+    wrapped.lines.join(' '), 'THE OPPONENT IS THE CPU ITS FIGHTER DRAWN AT RANDOM');
+
+  // Authored spacing is the author's too: a run of spaces used as a column
+  // separator must survive a line that never needed wrapping in the first place.
+  const spaced = layoutText('MOVE WASD     CONFIRM R', { size: 20, maxWidth: 900 });
+  check('wrap: a fitting line keeps its spacing', spaced.lines[0], 'MOVE WASD     CONFIRM R');
+
+  // An authored break is the author's, not the wrapper's.
+  const authored = layoutText('BOTH PADS ARE LIVE\nEACH SIDE PICKS ITS OWN FIGHTER', {
+    size: 20, maxWidth: 632, maxLines: 2,
+  });
+  check('wrap: honours an authored newline', authored.lines[0], 'BOTH PADS ARE LIVE');
+
+  // One line, no room to wrap: the size must come down rather than spill.
+  const shrunk = layoutText('A VERY LONG SINGLE LINE OF TEXT INDEED', { size: 40, maxWidth: 300 });
+  check('fit: one-line text shrinks to fit', shrunk.width <= 300, true);
+  check('fit: shrinking is reported', shrunk.clipped, true);
+  check('fit: still one line', shrunk.lines.length, 1);
+
+  // A single word wider than the box has nowhere to break; it must still obey.
+  const broken = layoutText('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', { size: 30, maxWidth: 120, maxLines: 3, minSize: 30 });
+  check('fit: an unbreakable word is broken anyway', broken.width <= 120, true);
+
+  // And the real screen: every run of text the mode selector draws, measured
+  // against the panel it is drawn into. `clipped` means the box had to win.
+  let worst = '';
+  let worstSlack = Infinity;
+  for (const t of MODE_TEXT_BOXES) {
+    const L = layoutText(t.text, t.box);
+    if (L.clipped) { check(`mode screen: "${t.what}" fits its box`, 'clipped', 'fits'); continue; }
+    const slack = t.box.maxWidth - L.width;
+    if (slack < worstSlack) { worstSlack = slack; worst = t.what; }
+  }
+  const clipped = MODE_TEXT_BOXES.filter((t) => layoutText(t.text, t.box).clipped).length;
+  check('mode screen: no text is shrunk or truncated', clipped, 0);
+  console.log(`      tightest fit is "${worst}", ${worstSlack.toFixed(1)}px of slack`);
+
+  // The regression itself, stated as the number that broke it: the old one-line
+  // blurb against the card it had to live in. If this ever stops being true the
+  // font metrics changed underneath the layout.
+  const wasWide = measureText('THE OPPONENT IS THE CPU, ITS FIGHTER DRAWN AT RANDOM', { size: 20 });
+  check('regression: the old blurb really was wider than its card', wasWide > 700, true);
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

@@ -29,13 +29,35 @@
 //   the renderer, because a sheet requested by the match you just left must not
 //   overwrite the skin of the match you just started. It disposes the late
 //   arrival instead, so the texture is released rather than leaked.
+//
+// WHO PLAYS PLAYER 2 — AND WHY THE LOOP NEVER FINDS OUT
+//   `core/loop.ts` owns ONE pair of input sources for the whole session and
+//   hands the same pair to every `Scene.tick`. It is not ours to edit, and
+//   swapping the pair under a running loop is not something it offers:
+//   `setLoopSources` only arms the NEXT `startLoop`, and `startLoopWith` tears
+//   the clock down and re-enters the scene from scratch.
+//
+//   It does not have to. The substitution happens ONE LEVEL DOWN, here, and it
+//   always did — `p2IsDummy` is the field that decides it. `advance` polls
+//   `sources[0]` for player 1 and, when the config asks for one, this match's
+//   own stand-in for player 2. In 1P that stand-in is `createCpuSource` from
+//   input/cpu.ts, which READS this match's SimState and never writes to it, so
+//   the sim stays exactly what it was: a pure function of two button masks.
+//
+// EVERYTHING RANDOM IN A 1P MATCH IS A FUNCTION OF `MatchConfig.seed`
+//   The opponent's character is drawn by `rollOpponent(seed)` and written back
+//   into the config, so the config alone reproduces the fight — the pick is
+//   recorded, not re-rolled, the moment it has been made. The CPU's own stream
+//   is seeded from the same word. `Math.random` and `Date.now` appear nowhere
+//   in this repo and must not start here.
 // =============================================================================
 
-import { ROUND_TIME, ROUNDS_TO_WIN } from '@/core/contracts';
+import { DummyMode, ROUND_TIME, ROUNDS_TO_WIN } from '@/core/contracts';
 import type {
-  DefRegistry, InputSource, MatchConfig, PlayerIx, Renderer, SimState, StateBuf,
+  CharId, DefRegistry, InputSource, MatchConfig, PlayerIx, Renderer, SimState, StateBuf,
 } from '@/core/contracts';
 import type { SceneMusic } from '@/audio/scene-music';
+import { Rng } from '@/core/rng';
 import { allocStateBuffer, createState, snapshot } from '@/sim/state';
 import { step } from '@/sim/step';
 import {
@@ -44,6 +66,7 @@ import {
 import { createStickSkin } from '@/gfx/skin/stick';
 import { loadSpriteSkin } from '@/gfx/skin/sprite';
 import { DUMMY_STAND, DummySource } from '@/input/dummy';
+import { createCpuSource } from '@/input/cpu';
 
 /** Everything a scene or a match needs from the outside world. */
 export interface GameDeps {
@@ -104,6 +127,152 @@ export const normalizeMatchConfig = (cfg: MatchConfig): MatchConfig => ({
 });
 
 // -----------------------------------------------------------------------------
+// PLAY MODE
+//
+// How many HUMANS are playing, and nothing else. It is a number rather than an
+// enum because that is what it means and because ui/mode.ts hands one back
+// across a module boundary: `1` and `2` cannot drift the way two enums can.
+//
+// THE MODE IS NOT A SECOND SOURCE OF TRUTH. `p2IsDummy` already is the field
+// the match reads to decide who polls for player 2, so the mode IS that field
+// and `modeOf` is the whole of the mapping. It therefore survives every hop
+// through the scenes inside the MatchConfig they were already carrying, with
+// nothing to keep in sync and nothing to forget on the way back from a KO.
+// -----------------------------------------------------------------------------
+
+/** 1 = the CPU takes player 2. 2 = both pads are human. */
+export type PlayMode = 1 | 2;
+export const ONE_PLAYER: PlayMode = 1;
+export const TWO_PLAYER: PlayMode = 2;
+
+/** The mode a config is already in. */
+export const modeOf = (cfg: MatchConfig): PlayMode => (cfg.p2IsDummy ? ONE_PLAYER : TWO_PLAYER);
+
+/** Mixed into the opponent draw so it cannot echo the first value the sim's own
+ *  stream produces from the same seed. Any odd constant would do. */
+const OPPONENT_SALT = 0x4f50_5021 | 0;
+
+/** How hard the 1P opponent plays. The only dial a MatchConfig carries; WHICH
+ *  strategy a character uses is input/cpu.ts's business, not this file's. */
+const CPU_AGGRESSION = 55;
+
+/**
+ * The seed the NEXT match runs on. A chain, not a clock: consecutive matches
+ * differ — so a 1P player does not fight the same opponent forever — while the
+ * whole session still replays from the seed it booted with.
+ */
+export const nextMatchSeed = (seed: number): number => new Rng(seed).next() | 0;
+
+/**
+ * Player 2's character in a 1P match: a PURE function of the seed that match
+ * will run on. Pure is the point. The draw is recorded into the config it was
+ * made for, so replaying that config reproduces the fight, and re-deriving it
+ * from the seed gives the same answer — the recording and the roll can never
+ * disagree about who the opponent was.
+ */
+export const rollOpponent = (seed: number): CharId => {
+  const n = SELECTABLE_CHARS.length;
+  if (n === 0) return DEFAULT_CHAR;
+  return SELECTABLE_CHARS[new Rng((seed ^ OPPONENT_SALT) | 0).below(n)] ?? DEFAULT_CHAR;
+};
+
+/**
+ * The config to open the CHARACTER SELECT on for `mode`.
+ *
+ * 1P draws a fresh opponent and hands player 2 to the CPU; 2P hands player 2
+ * back to the pad. Player 1's character is left alone in both: it is the human's
+ * and the select screen is about to ask them for it anyway.
+ *
+ * It ROLLS, so call it once per visit to the select screen — which is exactly
+ * what `createSelectScene` does — and never per frame.
+ */
+export const configForMode = (cfg: MatchConfig, mode: PlayMode): MatchConfig => {
+  if (mode === TWO_PLAYER) return { ...cfg, p2IsDummy: false };
+  const seed = nextMatchSeed(cfg.seed);
+  return {
+    ...cfg,
+    seed,
+    chars: [cfg.chars[0], rollOpponent(seed)],
+    p2IsDummy: true,
+    // CPU_BASIC is the mode that means "a real opponent": MatchRun routes it to
+    // input/cpu.ts. Every other DummyMode stays the scripted training dummy.
+    dummy: { mode: DummyMode.CPU_BASIC, seed, aggression: CPU_AGGRESSION },
+  };
+};
+
+// -----------------------------------------------------------------------------
+// THE END OF A MATCH
+// -----------------------------------------------------------------------------
+
+/**
+ * How long a finished match stays on screen before a scene may cut away.
+ *
+ * It MUST stay under the sim's own MATCH_END hold (`MATCH_END_FRAMES` = 150,
+ * private to sim/step.ts): at 150 `startNextMatch` clears the score and drops
+ * `matchOver` back to 0, so a scene that waits longer than the sim does watches
+ * the result it was waiting for vanish and then waits forever. Two seconds of
+ * the winning pose, and we are gone with half a second to spare.
+ */
+export const MATCH_END_HOLD_FRAMES = 120;
+
+/**
+ * Who won the MATCH, or -1 while one is still running.
+ *
+ * Read straight off the round wins: `step` only raises `matchOver` once a player
+ * has reached `roundsToWin`, so the higher count is the winner and there is no
+ * tie to break. `Ev.MATCH_END` carries the same index as its actor, for a caller
+ * that would rather read the event ring than the score.
+ */
+export const matchWinner = (s: SimState): PlayerIx | -1 => {
+  if (s.g.matchOver === 0) return -1;
+  return s.g.p0Wins > s.g.p1Wins ? 0 : 1;
+};
+
+let lastWinner: PlayerIx | -1 = -1;
+
+/** Who won the last match to FINISH, or -1 before one has. Presentation only —
+ *  the score itself lives in `g.p0Wins` / `g.p1Wins`, inside the state buffer. */
+export const lastMatchWinner = (): PlayerIx | -1 => lastWinner;
+
+/**
+ * THE MATCH-OVER LATCH, and the only thing that knows about the race.
+ *
+ * `g.matchOver` is a flag with a LIFETIME, not a terminal state: step raises it,
+ * holds it, and then `startNextMatch` clears it and opens a fresh match. So this
+ * reads it EXACTLY ONCE — on the rising edge — and from then on counts its own
+ * frames. A caller that kept polling the flag instead would watch the thing it
+ * was waiting for disappear at frame 150 and never fire at all.
+ *
+ * `over` is called once per STEPPED frame and goes true once, when the result
+ * has been on screen long enough to read and before the sim wraps around.
+ */
+export class MatchEndWatch {
+  /** Frames since the match was declared over; -1 while one is still fought. */
+  private held = -1;
+  /** Latched with the flag, so it survives the sim resetting the score. */
+  winner: PlayerIx | -1 = -1;
+
+  over(s: SimState): boolean {
+    if (this.held < 0) {
+      if (s.g.matchOver === 0) return false;
+      this.held = 0;
+      this.winner = matchWinner(s);
+      lastWinner = this.winner;
+      return false;
+    }
+    this.held = (this.held + 1) | 0;
+    return this.held >= MATCH_END_HOLD_FRAMES;
+  }
+
+  /** Re-arm. A scene calls this from `enter`, so one watch serves every match
+   *  that scene runs. */
+  reset(): void {
+    this.held = -1;
+    this.winner = -1;
+  }
+}
+
+// -----------------------------------------------------------------------------
 // The match
 // -----------------------------------------------------------------------------
 
@@ -129,7 +298,14 @@ class MatchRun implements Match {
 
   private readonly deps: GameDeps;
   /** Player 2's stand-in when the config says so. Null = a human on sources[1]. */
-  private readonly dummy: DummySource | null;
+  private readonly p2: InputSource | null;
+  /**
+   * The same object as `p2` when the stand-in is the SCRIPTED dummy, null when
+   * it is the CPU. Only the scripted one reasons in relative directions and has
+   * to be told which way it is pointing; the CPU reads facing out of the state
+   * it was handed, which is why it needs no such back-channel.
+   */
+  private readonly scripted: DummySource | null;
   private dead = false;
 
   constructor(deps: GameDeps, cfg: MatchConfig) {
@@ -138,7 +314,27 @@ class MatchRun implements Match {
     this.state = createState(
       this.cfg.seed, this.cfg.chars[0], this.cfg.chars[1], this.cfg.stage, deps.registry,
     );
-    this.dummy = this.cfg.p2IsDummy ? new DummySource(this.cfg.dummy, -1) : null;
+
+    if (!this.cfg.p2IsDummy) {
+      this.p2 = null;
+      this.scripted = null;
+    } else if (this.cfg.dummy.mode === DummyMode.CPU_BASIC) {
+      // THE 1P OPPONENT. An InputSource like any other: it is handed the live
+      // state to READ and returns a mask, so nothing about the sim changes —
+      // and it is seeded off the config, so the same seed against the same
+      // player-1 inputs replays the same fight, frame for frame.
+      this.p2 = createCpuSource(this.state, {
+        charId: this.cfg.chars[1], player: 1, seed: this.cfg.seed,
+        // The config's one dial, spent here: `aggression` is what a MatchConfig
+        // has to say about difficulty, `level` is what cpu.ts calls it.
+        level: this.cfg.dummy.aggression,
+      });
+      this.scripted = null;
+    } else {
+      const d = new DummySource(this.cfg.dummy, -1);
+      this.p2 = d;
+      this.scripted = d;
+    }
   }
 
   prime(): void {
@@ -153,20 +349,24 @@ class MatchRun implements Match {
     // last drew and the one about to run.
     snapshot(this.prev, this.state.buf);
     const in0 = sources[0].poll(frame);
-    let in1: number;
-    if (this.dummy !== null) {
-      // The dummy reasons in RELATIVE directions, so it has to be told which
-      // way it is pointing before it converts them to absolute ones.
-      this.dummy.setFacing(this.state.fighter(1).facing);
-      in1 = this.dummy.poll(frame);
-    } else {
-      in1 = sources[1].poll(frame);
+    // Player 2's pad is polled EVEN WHEN THE CPU IS PLAYING, and its mask
+    // dropped. `StickyLatch` banks a tap that began and ended between two ticks,
+    // so a pad nobody drains hands that stale press to whatever screen reads it
+    // next — a phantom input on the frame a 1P match hands the pad back.
+    let in1 = sources[1].poll(frame);
+    if (this.p2 !== null) {
+      // Relative directions only: see the field comment on `scripted`.
+      this.scripted?.setFacing(this.state.fighter(1).facing);
+      in1 = this.p2.poll(frame);
     }
     step(this.state, in0, in1);
   }
 
   dispose(): void {
     this.dead = true;
+    // The stand-in belongs to THIS match. The loop's two real sources do not,
+    // and are never touched here.
+    this.p2?.dispose();
   }
 
   /** Step 1 synchronously, step 2 in the background. See the header. */
