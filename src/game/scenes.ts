@@ -165,9 +165,11 @@ class FightScene implements Scene {
    *  that cannot draw the overlay — a countdown nobody can see is not a
    *  countdown, it is three and a half seconds of a dead stage. */
   private introEnd = 0;
-  /** This match's timeline, from the troupe track's downbeat. */
+  /** This match's timeline. Committed on frame 0 — see `commitTimeline`. */
   private introTiming: IntroTiming = DEFAULT_INTRO_TIMING;
-  /** Frames spent on frame 0 waiting for the track to start. See `atDownbeat`. */
+  /** What the troupe's track asks for, if its downbeat is ever heard. */
+  private themeTiming: IntroTiming = DEFAULT_INTRO_TIMING;
+  /** Frames spent on frame 0 waiting for the track to start. */
   private syncWait = 0;
   private overlay: OverlayHost | null = null;
 
@@ -188,23 +190,34 @@ class FightScene implements Scene {
   };
 
   /**
-   * Hold frame 0 until the track is actually sounding, so that a countdown
-   * timed to land six seconds in agrees with the recording about where zero is.
+   * Frame 0 decides the whole timeline, because only frame 0 knows whether
+   * there is a downbeat to hold for.
    *
-   * It waits ONLY when there is a downbeat coming. `settled` is false while the
-   * AudioContext is still suspended — the browser keeps it that way until a
-   * real keypress, and the game boots straight into a fight — so on the very
-   * first match this returns false immediately rather than holding a black
-   * screen for music that cannot start yet. The cap covers the rest: a missing
-   * file, a muted build, an unlock that never comes.
+   * It first waits — briefly — for the track to actually start, so a countdown
+   * timed to land eight seconds in agrees with the recording about where zero
+   * is. It waits ONLY when a downbeat is coming: `settled` is false while the
+   * AudioContext is still suspended (the browser keeps it that way until a real
+   * keypress, and the game boots straight into a fight), so on the very first
+   * match it does not wait at all. The cap covers the rest — a missing file, a
+   * muted build, an unlock that never comes.
+   *
+   * THEN IT COMMITS. If the track IS rolling, the troupe's timing is used and
+   * the hold lands GO on the music. If it is NOT, the hold has nothing to wait
+   * for and would be a dead, silent stage — eight seconds of it, for Caporal —
+   * so the default 3.5 s countdown is used instead. Returns false while still
+   * waiting.
    */
-  private atDownbeat(): boolean {
+  private commitTimeline(): boolean {
     const music = this.deps.music;
-    if (music === undefined) return true;
-    if (this.syncWait >= INTRO_SYNC_WAIT_FRAMES) return true;
-    if (!music.settled || music.rolling) return true;
-    this.syncWait++;
-    return false;
+    const rolling = music !== undefined && music.rolling;
+    if (!rolling && music !== undefined && music.settled
+      && this.syncWait < INTRO_SYNC_WAIT_FRAMES) {
+      this.syncWait++;
+      return false;
+    }
+    this.introTiming = rolling ? this.themeTiming : DEFAULT_INTRO_TIMING;
+    this.introEnd = this.overlay === null ? 0 : this.introTiming.totalFrames;
+    return true;
   }
 
   enter(): void {
@@ -231,8 +244,11 @@ class FightScene implements Scene {
     this.overlay = overlayHostOf(this.deps.renderer);
     this.introFrame = 0;
     this.syncWait = 0;
-    this.introTiming =
+    this.themeTiming =
       theme === null ? DEFAULT_INTRO_TIMING : introTimingFor(theme.goAtMs);
+    // Optimistic until frame 0 commits: either way frame 0 draws pure black, so
+    // a downgrade to the default timeline is never visible.
+    this.introTiming = this.themeTiming;
     this.introEnd = this.overlay === null ? 0 : this.introTiming.totalFrames;
     this.endWatch.reset();
   }
@@ -247,9 +263,9 @@ class FightScene implements Scene {
     if (consumeSelectRequest()) return createModeScene(this.deps, m.cfg, this.mode);
 
     if (this.introFrame < this.introEnd) {
-      // Frame 0 is held until the track is sounding; every frame after it is
-      // counted off the track's own clock.
-      if (this.introFrame > 0 || this.atDownbeat()) this.introFrame++;
+      // Frame 0 is held until the track is sounding and the timeline is
+      // chosen; every frame after it is counted off the track's own clock.
+      if (this.introFrame > 0 || this.commitTimeline()) this.introFrame++;
       // Polled and thrown away. `StickyLatch` (input/buffer.ts) banks a tap that
       // began and ended between two ticks, so NOT polling would spend every
       // mashed button of the countdown on the first frame of the fight. Only

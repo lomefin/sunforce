@@ -6,8 +6,9 @@
 // PLAYER TWO BELONGS TO: face a Diablada and you fight to a Diablada track, in
 // front of a Diablada panorama. Six characters, three troupes.
 //
-// A troupe with no backdrop of its own keeps the stage's, which is where Caporal
-// still is — so this is additive, not a fork of the stage system.
+// A troupe with no backdrop of its own keeps the stage's, so this is additive
+// rather than a fork of the stage system. All three name one today, and
+// Caporal's happens to be what STAGE_1 already wore.
 //
 // WHY PLAYER TWO AND NOT PLAYER ONE
 //   Player one is the one being answered. In 1P the CPU opponent is drawn at
@@ -57,7 +58,11 @@ export interface TroupeTheme {
   /**
    * The panorama this troupe fights in front of, as a StageLayer texture path
    * (`stages/<file>.png`, resolved under public/art/). Absent means the stage
-   * keeps its own backdrop — which is still the case for Caporal.
+   * keeps whatever its own StageDef declares.
+   *
+   * All three troupes name one today. Caporal's IS the stage's own default —
+   * stated here anyway so the table reads uniformly and a future stage cannot
+   * silently take its panorama away.
    *
    * Only the ART changes. The geometry, the walls, the ceiling and the camera
    * bounds are the stage's and stay the stage's, so a backdrop swap can never
@@ -79,8 +84,19 @@ export const DEFAULT_GO_AT_MS = 3000;
  * public/audio/music/; nothing else in the game needs to know.
  */
 export const TROUPE_THEMES: readonly TroupeTheme[] = [
-  { troupe: 'Caporal', musicId: 'stage-caporal', goAtMs: DEFAULT_GO_AT_MS },
-  { troupe: 'Tinku', musicId: 'stage-tinku', goAtMs: DEFAULT_GO_AT_MS, backdrop: 'stages/stage-tinku.png' },
+  // Eight seconds in — the longest opener of the three.
+  {
+    troupe: 'Caporal',
+    musicId: 'stage-caporal',
+    goAtMs: 8000,
+    backdrop: 'stages/stage-caporal.png',
+  },
+  {
+    troupe: 'Tinku',
+    musicId: 'stage-tinku',
+    goAtMs: DEFAULT_GO_AT_MS,
+    backdrop: 'stages/stage-tinku.png',
+  },
   // Six seconds in: this recording opens long, and the countdown waits for it.
   {
     troupe: 'Diablada',

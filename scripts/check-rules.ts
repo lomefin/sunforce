@@ -14,7 +14,7 @@ import {
   introPhaseAt, introPhaseFrames, introTimingFor,
 } from '../src/ui/intro';
 import {
-  DEFAULT_GO_AT_MS, TROUPE_THEMES, stageForTroupe, themeForOpponent,
+  DEFAULT_GO_AT_MS, TROUPE_THEMES, stageForTroupe, themeForOpponent, themeOfTroupe,
 } from '../src/data/troupes';
 
 let failures = 0;
@@ -377,7 +377,11 @@ import { animOfState } from '../src/gfx/renderer';
 // both are checkable with no audio stack and no browser.
 {
   const SIM_HZ_MS = 1000 / 60;
-  const msOf = (frames: number): number => frames * SIM_HZ_MS;
+  // Rounded: a frame is 1000/60 ms, which is not representable in binary, so
+  // 480 frames — exactly eight seconds — multiplies out to 8000.000000000001.
+  // The timeline is authored in whole frames and every target here is whole ms,
+  // and one frame of error is 16.7 ms, so rounding cannot hide a real mistake.
+  const msOf = (frames: number): number => Math.round(frames * SIM_HZ_MS);
 
   // Every character resolves to a track, and the six map onto exactly three.
   const ids = [CharId.A, CharId.B, CharId.C, CharId.D, CharId.E, CharId.F]
@@ -460,10 +464,11 @@ import { animOfState } from '../src/gfx/renderer';
     .filter((t) => !existsSync(`public/art/${t.backdrop}`))
     .map((t) => `${t.troupe} -> ${t.backdrop}`);
   check('stage dressing: every declared backdrop is built', missingArt.join(', '), '');
-  check('stage dressing: a troupe without one keeps the stage\'s', plain, stage1);
+  check('stage dressing: caporal resolves to the stage\'s own art',
+    plain.layers[0]?.texture, stage1.layers[0]?.texture);
   check('stage dressing: null theme is identity', stageForTroupe(stage1, null), stage1);
   check('stage dressing: the stage1 def is never mutated',
-    stage1.layers[0]?.texture, 'stages/stage-1.png');
+    stage1.layers[0]?.texture, 'stages/stage-caporal.png');
 
   const sameGeometry = dressed.width === stage1.width
     && dressed.wallPad === stage1.wallPad
@@ -480,6 +485,20 @@ import { animOfState } from '../src/gfx/renderer';
   const D0 = dressed.layers[0]!;
   check('stage dressing: the layer keeps its parallax and scale',
     D0.parallax === L0.parallax && D0.scale === L0.scale && D0.yOffset === L0.yOffset, true);
+
+  // THE HEADLINE NUMBERS, one per track: each track's GO must land exactly where
+  // its recording says, and nowhere near where another's does.
+  check('intro: caporal GO lands at 8000 ms',
+    msOf(introTimingFor(themeOfTroupe('Caporal')?.goAtMs ?? 0).goFrame), 8000);
+  check('intro: tinku GO lands at the default 3000 ms',
+    msOf(introTimingFor(themeOfTroupe('Tinku')?.goAtMs ?? 0).goFrame), 3000);
+
+  // ...and in general: a declared downbeat is honoured to the millisecond,
+  // unless it is below the floor, in which case it clamps there.
+  const honoured = TROUPE_THEMES.every(
+    (t) => msOf(introTimingFor(t.goAtMs).goFrame) === Math.max(INTRO_MIN_GO_AT_MS, t.goAtMs),
+  );
+  check('intro: every declared downbeat is honoured exactly', honoured, true);
 
   // Every registered track must be timeable — no negative or fractional holds.
   const sane = TROUPE_THEMES.every((t) => {

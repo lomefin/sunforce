@@ -56,11 +56,17 @@ import type { StageDef, StageLayer } from '@/core/contracts';
 // THE BACKDROP — source art
 // -----------------------------------------------------------------------------
 
+// The stage's DEFAULT panorama is the Caporal one. The stage is still STAGE_1
+// and its id is still sequential — but every fight is dressed by the troupe on
+// the right (src/data/troupes.ts), and Caporal is the troupe that does not
+// override anything, so its art is what the bare stage wears. Naming the file
+// for the troupe rather than the stage keeps the three panoramas symmetric.
+
 /** Art-root-relative, matching the sprite-sheet convention (public/art/…). */
-const BACKDROP_TEX = 'stages/stage-1.png';
+const BACKDROP_TEX = 'stages/stage-caporal.png';
 
 /** What the browser actually fetches. public/ is the web root. */
-const BACKDROP_URL = '/art/stages/stage-1.png';
+const BACKDROP_URL = '/art/stages/stage-caporal.png';
 
 /** Source pixels. Measured, not guessed: 2172 x 724, exactly 3:1. */
 const IMAGE_W = 2172;
