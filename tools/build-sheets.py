@@ -60,6 +60,12 @@ SOFT_HITSTUN, HARD_HITSTUN = 16, 21
 # the LONGER of the two and holds (loopAt -1), so a blocked punch simply ends
 # early rather than the drawing running out under a blocked kick.
 BLOCKSTUN = 14
+# THE IDLE BREATH, in sim frames for one full cycle. A fighting game's rest pose
+# is never still; a second per loop is slow enough to read as breathing and fast
+# enough not to look like a stutter. Shared out over however many drawings the
+# costume has, so adding a fifth pose makes each one shorter, not the loop
+# longer — the character keeps breathing at the same rate.
+IDLE_CYCLE = 60
 
 # A frame file is <costume>-<clip>.png or <costume>-<clip>-<n>.png, and the clip
 # part is words only. 'hard-hit-2' is frame 2 of hard-hit; 'hard-hit02' is a typo
@@ -154,10 +160,19 @@ def measure(path, is_air):
                 head_cx=x+hx+hw/2, air=is_air, path=path)
 
 def build(costume, clips):
-    if 'neutral' not in clips:
+    # The ANCHOR pose. `base_h` normalises the whole costume to 378 world units,
+    # so it has to be one specific drawing and the same one every build. The bare
+    # <costume>-neutral.png is it. A costume that only ever had numbered neutrals
+    # anchors on the first of them rather than being dropped entirely.
+    anchor = 'neutral' if 'neutral' in clips else next(
+        (n for n in sorted(clips, key=lambda k: (len(k), k))
+         if re.fullmatch(r'neutral-\d+', n)), None)
+    if anchor is None:
         print(f'  {costume}: no neutral frame, skipping'); return None
+    if anchor != 'neutral':
+        print(f'  {costume}: no bare neutral — anchoring height on {anchor}')
     meas = {k: measure(p, k.startswith('jump')) for k,p in clips.items()}
-    base_h = meas['neutral']['h']                    # standing height, px
+    base_h = meas[anchor]['h']                       # standing height, px
     tmp = '/tmp/sf-sheets'; os.makedirs(tmp, exist_ok=True)
 
     frames = []
@@ -219,6 +234,15 @@ def build(costume, clips):
         d = max(1, total // n)
         return [d] * (n - 1) + [max(1, total - d * (n - 1))]
 
+    # THE IDLE BREATH. The NUMBERED neutrals are the cycle: <costume>-neutral-1
+    # .. -N in order, looping. The bare <costume>-neutral.png is deliberately NOT
+    # in it — it is the anchor pose (it sets the costume's scale) and it is also
+    # the rest frame either side of a punch and a kick, so folding it into the
+    # loop would put the same drawing on screen in two different jobs. A costume
+    # with no numbered neutrals keeps its single standing pose, as before.
+    idle  = [n for n in series('neutral') if n != 'neutral'] or [anchor]
+    idled = spread(IDLE_CYCLE, len(idle))
+
     walk  = series('walk') or ['neutral']
     jumps = series('jump')
     # first ~60% of the jump art is the rise, the rest is the fall
@@ -253,7 +277,7 @@ def build(costume, clips):
     blockd = spread(BLOCKSTUN, len(block))
     hit_soft = [fr(n, d) for n, d in zip(soft, softd)]
     clipset = {
-      "IDLE":       {"loopAt":0,  "frames":[fr('neutral',1)]},
+      "IDLE":       {"loopAt":0,  "frames":[fr(n,d) for n,d in zip(idle, idled)]},
       "WALK_F":     {"loopAt":0,  "frames":[fr(n,wdur) for n in walk]},
       "WALK_B":     {"loopAt":0,  "frames":[fr(n,wdur+1) for n in reversed(walk)]},
       "JUMP_SQUAT": {"loopAt":-1, "frames":[fr('neutral',1)]},
@@ -382,7 +406,7 @@ def main():
     # game runs — but it is the list of art still to draw, and it should never be
     # something you have to discover by watching the game.
     WANT = {
-        'neutral':  'IDLE / JUMP_SQUAT / LAND fallback',
+        'neutral':  'IDLE loop (numbered) / JUMP_SQUAT / LAND / anchor',
         'walk':     'WALK_F + WALK_B',
         'punch':    'ATK_5P active frames',
         'kick':     'ATK_5K active frames',

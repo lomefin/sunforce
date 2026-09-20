@@ -6,7 +6,7 @@ import { charOf, createState } from '../src/sim/state';
 import { hurtBoxesOf } from '../src/sim/collision';
 import { step } from '../src/sim/step';
 import { REGISTRY } from '../src/data/registry';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { layoutText, measureText } from '../src/ui/font';
 import { MODE_TEXT_BOXES } from '../src/ui/mode';
 import {
@@ -459,11 +459,18 @@ import { animOfState } from '../src/gfx/renderer';
   // A declared backdrop that is not on disk is a black screen with a countdown
   // over it, and nothing else in the build would say so. `npm run sheets`
   // stages assets/backgrounds/*.png into public/art/stages/.
-  const missingArt = TROUPE_THEMES
-    .filter((t) => t.backdrop !== undefined)
-    .filter((t) => !existsSync(`public/art/${t.backdrop}`))
-    .map((t) => `${t.troupe} -> ${t.backdrop}`);
-  check('stage dressing: every declared backdrop is built', missingArt.join(', '), '');
+  // Skipped rather than failed on a tree where `npm run sheets` has never run:
+  // public/art is generated and gitignored, so a fresh clone legitimately has
+  // none of it, and a red check there would be noise rather than a defect.
+  if (!existsSync('public/art/stages')) {
+    console.log('SKIP  stage dressing: public/art not built — run `npm run sheets`');
+  } else {
+    const missingArt = TROUPE_THEMES
+      .filter((t) => t.backdrop !== undefined)
+      .filter((t) => !existsSync(`public/art/${t.backdrop}`))
+      .map((t) => `${t.troupe} -> ${t.backdrop}`);
+    check('stage dressing: every declared backdrop is built', missingArt.join(', '), '');
+  }
   check('stage dressing: caporal resolves to the stage\'s own art',
     plain.layers[0]?.texture, stage1.layers[0]?.texture);
   check('stage dressing: null theme is identity', stageForTroupe(stage1, null), stage1);
@@ -562,6 +569,42 @@ import { animOfState } from '../src/gfx/renderer';
   const grounded = [CharId.B, CharId.C, CharId.D, CharId.E]
     .every((id) => flight(id, 0).apex === base.apex);
   check('jump: nobody else was quietly changed', grounded, true);
+}
+
+// =============================================================================
+// THE IDLE BREATH
+// -----------------------------------------------------------------------------
+// A rest pose is never still. `tools/build-sheets.py` turns the NUMBERED
+// neutrals (<costume>-neutral-1 .. -N) into a looping IDLE clip; a costume with
+// only the bare drawing keeps its single standing pose. The failure this
+// catches is the silent one: the builder emitting a one-frame IDLE even though
+// the drawings are there, which is exactly what it used to do.
+{
+  const SHEETS = ['a', 'b', 'c', 'd', 'e', 'f'];
+  if (!existsSync('public/art/a.sheet.json')) {
+    console.log('SKIP  idle: sheets not built — run `npm run sheets`');
+  } else {
+    let looping = 0;
+    let bad = '';
+    for (const slot of SHEETS) {
+      const sheet = JSON.parse(readFileSync(`public/art/${slot}.sheet.json`, 'utf8')) as {
+        clips: Record<string, { loopAt: number; frames: { dur: number }[] }>;
+      };
+      const idle = sheet.clips.IDLE;
+      if (idle === undefined) { bad += `${slot}:no-IDLE `; continue; }
+      // Every IDLE must loop, whether it is one drawing or five.
+      if (idle.loopAt !== 0) bad += `${slot}:loopAt=${idle.loopAt} `;
+      // However many drawings, one full breath is the same length — so adding a
+      // pose makes each shorter rather than slowing the character down.
+      const cycle = idle.frames.reduce((n, f) => n + f.dur, 0);
+      if (cycle !== 60) bad += `${slot}:cycle=${cycle} `;
+      if (idle.frames.length > 1) looping++;
+    }
+    check('idle: every IDLE clip loops on a 60-frame breath', bad.trim(), '');
+    // The two Tinkus are the costumes with numbered neutrals drawn today.
+    check('idle: the costumes with numbered neutrals actually animate',
+      looping >= 2, true);
+  }
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
