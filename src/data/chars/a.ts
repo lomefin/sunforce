@@ -143,8 +143,8 @@ export const A_5K: MoveDef = {
 
 export const CHAR_A: CharDef = {
   id: CharId.A,
-  name: 'A',
-  dance: 'A',
+  name: 'Caporal',
+  dance: 'Caporal',
   hp: 1000,
   conceptSpace: CS,
   physics: {

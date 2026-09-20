@@ -139,8 +139,8 @@ export const D_5K: MoveDef = {
 
 export const CHAR_D: CharDef = {
   id: CharId.D,
-  name: 'D',
-  dance: 'D',
+  name: 'Tinku Supay',
+  dance: 'Tinku',
   hp: 1000,
   conceptSpace: CS,
   physics: {

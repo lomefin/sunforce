@@ -53,44 +53,26 @@ player's attacks sit under the hand already resting on their movement keys.
 - Flow: pick 2 characters → load a stage → fight. **No story mode.**
 - Characters are **stick figures for now** — placeholders, deliberately
 
-## Naming — sequential, always
+## Naming — sequential IDs, real names for display
 
-Identifiers are **sequential and neutral**. Do not invent proper names for things.
+**Identifiers stay sequential.** `CharId` is `A`..`F`, stages are `STAGE_1`..`STAGE_6`, music
+is `stage-1.mp3`. Those are the stable keys: enums, filenames, `roster.json`, sheet names.
+Never rename them — a character's display name changing must never move a file.
 
-- characters: `A B C D E F` (`CharId.A` … `CharId.F`)
-- stages: `stage-1` … `stage-6` (`StageId.STAGE_1` … `StageId.STAGE_6`)
-- stage music: `public/audio/music/stage-1.webm` … `stage-6.webm`
+**Display names are real.** `CharDef.name` is what the UI shows:
 
-The dance references below are **art direction only** — they inform how a character moves and
-what its costume will eventually look like. They are not identifiers and must not appear as
-names in the UI, in enums, in filenames, or in stage titles.
+| Slot | Name | Costume | Troupe |
+|------|------|---------|--------|
+| A | Caporal | male-caporal | Caporal |
+| B | Machona | female-caporal | Caporal |
+| C | Macho Tinku | male-tinku | Tinku |
+| D | Tinku Supay | female-tinku | Tinku |
+| E | Diablo | male-diablada | Diablada |
+| F | Virtud | female-diablada | Diablada |
 
-## Sprite pipeline
+`CharDef.dance` is the troupe the character belongs to, which two characters can share.
 
-SunForce renders like Guilty Gear XX: **one image per animation frame, blitted as a single
-quad. No bones at runtime.**
-
-Drop PNGs into `assets/movements/` and run `npm run sheets`. Naming IS the interface:
-
-```
-<costume>-<clip>.png          male-caporal-neutral.png
-<costume>-<clip>-<n>.png      female-caporal-walk-2.png
-```
-
-Recognised clips: `neutral`, `punch`, `kick`, `walk-1..n`, `jump-1..n`. The builder packs an
-atlas per costume into `public/art/<costume>.png` and writes one `SpriteSheet` JSON per roster
-slot. `tools/build-sheets.py` maps slots to costumes (`ROSTER`).
-
-### The two alignment rules — the only hard part
-- **Grounded frames anchor on the sole**, so feet sit exactly on the world ground line.
-- **Airborne frames anchor on the head**, offset down by that costume's standing height,
-  because tucked feet have no ground contact to measure. This puts `origin.y` *below* the
-  bitmap, which is correct — never clamp it into the frame, or every jump drops to the floor.
-
-Each costume's `unitsPerPx` is derived from its own neutral height so every character is
-exactly 378 world units tall regardless of how its art was drawn.
-
-A missing or broken sheet falls back to the procedural stick skin, so the game always runs.
+**Stages stay sequential in the UI too** — "Stage 1", not a place name.
 
 ## Uniform look — placeholders stay uniform
 
@@ -106,20 +88,14 @@ Two standing rules, both deliberate:
 
 Differentiate by *play*, not by *looks*, until the real art lands.
 
-## Art direction reference (not identifiers)
+## Art direction reference
 
-`assets/` holds reference photos of six dance troupes; `concept/` holds hand-authored vector
-character sheets (640×960) already split into named body-part groups — `legs`, `torso`,
-`arms`, `head`, `headwear`, `puffs`, `bells`, `footwear`.
+`assets/` holds reference photos of the Oruro / Arica carnival troupes; `concept/` holds the
+early hand-authored vector sheets. The three troupes in the game are **Caporal**, **Tinku**
+(a real ritual combat dance from Potosí — the reason it is the brawler) and **Diablada**.
 
-| Slot | Reference dance | Read of the dance | Archetype |
-|------|-----------------|-------------------|-----------|
-| A | Caporal | commanding high-step, heavy boots, bells | rushdown, strong kicks |
-| B | Morenada | slow heavy stomp, huge ornate shell | heavyweight / armour |
-| C | Tinku | *an actual ritual combat dance* | brawler, fast punches |
-| D | Tobas | enormous leaps, long limbs | aerial / mobility |
-| E | Waka Waka | wide spinning skirt, sweeping motion | trickster, 50/50 |
-| F | Waka Waka Toro | bull frame at the waist, charging | charge / rush |
+Archetype intent, which the CPU strategies in `src/input/cpu.ts` express: A all-rounder,
+B heavyweight, C rushdown, D aerial, E trickster, F charge.
 
 ## The one architectural rule that matters
 
