@@ -161,6 +161,61 @@ export interface HealthBarOpts {
  * The caller has already bound a flat material (`batch.use(batch.solidMaterial)`)
  * and set the screen-space view-projection — exactly as `drawText` expects.
  */
+/** A slim readout under the health bar. Aura, not HP — see AURA_SCALE. */
+export interface AuraBarOpts {
+  readonly x: number; readonly y: number;
+  readonly w: number; readonly h: number;
+  /** Current aura over the fighter's own ceiling, 0..1. */
+  readonly frac: number;
+  /** Where the dash gate sits on THIS fighter's bar, 0..1. Above it, a dash is
+   *  affordable; at or below it, refused. Drawn as a notch so the player can
+   *  see the line rather than discover it by pressing. */
+  readonly threshold: number;
+  /** P1 drains toward the screen edge, P2 the other way — same as the HP. */
+  readonly leftSide: boolean;
+  readonly z?: number;
+}
+
+/**
+ * AURA. Deliberately NOT a wiphala weave: the flag belongs to the health bar,
+ * and a second one under it would compete with the thing the player actually
+ * has to read at a glance. This is a plain slim strip in the round clock's
+ * gold, so it reads as the same family without shouting.
+ *
+ * It DIMS below the dash threshold, which is the one state change worth seeing
+ * in peripheral vision: above the notch you have the option, below it you do
+ * not.
+ */
+export const drawAuraBar = (out: InstanceWriter, o: AuraBarOpts): void => {
+  const { x, y, w, h } = o;
+  if (!(w > 0) || !(h > 0)) return;
+  const z = o.z ?? 0;
+  const frac = clamp01(o.frac);
+  const line = Math.max(1, Math.round(h * 0.18));
+
+  // Plate and a dark inset, so the strip keeps a silhouette over bright art.
+  writeQuad(out, x - line, y - line, w + line * 2, h + line * 2, 0x090713, 0.92, z);
+  writeQuad(out, x, y, w, h, 0x1b1528, 1, z + 1);
+
+  // The fill hugs the same outer edge the health does, and empties inward.
+  const fw = Math.round(w * frac);
+  if (fw > 0) {
+    const fx2 = o.leftSide ? x : x + w - fw;
+    const spent = frac <= o.threshold;
+    writeQuad(out, fx2, y, fw, h, spent ? 0x8a6a1f : 0xffc93c, spent ? 0.85 : 1, z + 2);
+    // A brighter lip along the top: reads as fullness at a glance.
+    writeQuad(out, fx2, y + h - line, fw, line, spent ? 0xb98f2c : 0xffe98a, 1, z + 3);
+  }
+
+  // The gate. Clamped inside the bar so a ceiling equal to the threshold —
+  // Diablo, who can never dash — still shows its notch rather than losing it
+  // off the end.
+  const t = clamp01(o.threshold);
+  const tx = o.leftSide ? x + Math.round(w * t) : x + w - Math.round(w * t);
+  const notch = Math.max(1, Math.round(h * 0.22));
+  writeQuad(out, Math.min(Math.max(tx - notch * 0.5, x), x + w - notch), y - line, notch, h + line * 2, 0xf6efdc, 0.75, z + 4);
+};
+
 export const drawHealthBar = (out: InstanceWriter, o: HealthBarOpts): void => {
   const { x, y, w, h } = o;
   if (!(w > 0) || !(h > 0)) return;

@@ -143,9 +143,6 @@ export const conceptBox = (b: ConceptBox, cs: ConceptSpace, where: string): FxBo
 /** `v` scaled by a percentage rating, rounded, never below 1. */
 const byTrait = (v: number, pct: number): number => Math.max(1, Math.round((v * pct) / 100));
 
-/** Same, but free to reach 0 — for frame counts that may legitimately vanish. */
-const byTrait0 = (v: number, pct: number): number => Math.max(0, Math.round((v * pct) / 100));
-
 /**
  * INVERSE ratings: the ones where a bigger number means LESS of the thing.
  * Weight is mass, so knockback received goes as 100/weight — 120 slides 0.83x
@@ -221,23 +218,13 @@ export const compileMove = (
 ): CompiledMove => {
   const powerPct = powerOf(m.group, traits);
 
-  // STAMINA shortens the RECOVERY TAIL and nothing else. The frames before and
-  // during a hitbox are the move's identity — its startup is its risk and its
-  // active window is its reach — so stamina may not touch them; what it buys is
-  // getting back to neutral sooner, which is exactly "able to hit again".
+  // STAMINA USED TO TRIM THE RECOVERY TAIL HERE. It does not any more: aura
+  // owns the cadence of hits now, as a live resource the fighter spends, and
+  // having stamina ALSO shorten every move would be the same rating paying
+  // twice. Stamina is the ceiling of the aura pool and nothing else.
   //
-  // Implemented by trimming `totalFrames`, because compile expands the timeline
-  // into one entry per frame and the tail entries ARE the recovery. Cutting
-  // there cannot disturb a hitbox, and the sprite clip simply ends on its last
-  // pose a frame early — which is a neutral pose returning to a neutral idle.
-  const lastActive = m.timeline.reduce(
-    (n, k) => (k.hit !== undefined && k.hit.length > 0 ? Math.max(n, k.at) : n), -1,
-  );
-  const recoverFrom = lastActive < 0 ? m.totalFrames : lastActive + 1;
-  const recoverFrames = m.totalFrames - recoverFrom;
-  const totalFrames = recoverFrames <= 0
-    ? m.totalFrames
-    : recoverFrom + byTrait0(recoverFrames, inverse(traits.stamina));
+  // Move length is therefore the authored length, for everyone.
+  const totalFrames = m.totalFrames;
   const where = `${m.name} [MoveId ${m.id}]`;
   assert(m.totalFrames > 0, `${where}: totalFrames must be positive, got ${m.totalFrames}`);
   assert(m.timeline.length > 0, `${where}: timeline is empty`);

@@ -36,14 +36,16 @@
 // =============================================================================
 
 import {
-  B, Contact, Ev, FF, INPUT_LENIENCY, MF, MoveId, RoundState, S, SfxId,
+  AURA_COST_DASH, AURA_COST_KICK, AURA_COST_PUNCH, AURA_DASH_MIN, AURA_SCALE,
+  B, Contact, DASH_MIN_MOVEMENT, DOUBLE_TAP_FRAMES, Ev, FF, G, INPUT_LENIENCY,
+  MF, MoveId, RoundState, S, SfxId,
 } from '@/core/contracts';
 import type {
   ButtonMask, CompiledMove, FighterView, GroupMask, PlayerIx, SimState,
 } from '@/core/contracts';
 import { On } from '@/core/contracts';
 import {
-  ringConsume, ringConsumed, ringFindPress, ringHeld, ringReleaseEdge,
+  ringConsume, ringConsumed, ringFindPress, ringHeld, ringPressEdge, ringReleaseEdge,
 } from '@/core/ring';
 import { charOf, otherPlayer } from '@/sim/state';
 import { currentFrame, isAirborne, moveOf, pushBoxOf } from '@/sim/collision';
@@ -101,6 +103,17 @@ export const tickTimers = (s: SimState, p: PlayerIx): void => {
   if (f.wakeupTimer > 0) f.wakeupTimer--;
   if (f.landingLag > 0) f.landingLag--;
   if (f.dashTimer > 0) f.dashTimer--;
+  if (f.tapFrames > 0) f.tapFrames--;
+
+  // AURA REGEN. Exactly `stamina` ticks a frame — see AURA_SCALE for why that
+  // is an integer and not a rounded fraction. Inside the hitstop gate with
+  // every other timer, so a freeze suspends recovery along with everything
+  // else rather than handing out free aura for being hit.
+  const max = charOf(s, p).traits.stamina * AURA_SCALE;
+  if (f.aura < max) {
+    const next = f.aura + charOf(s, p).traits.stamina;
+    f.aura = next > max ? max : next;
+  }
   if (f.throwTechTimer > 0) f.throwTechTimer--;
   if (f.throwHoldTimer > 0) f.throwHoldTimer--;
 };
@@ -108,6 +121,26 @@ export const tickTimers = (s: SimState, p: PlayerIx): void => {
 // -----------------------------------------------------------------------------
 // Move matching
 // -----------------------------------------------------------------------------
+
+/**
+ * What a move costs in aura. Punches and kicks only — movement, jumps and
+ * throws are free, because aura is about the CADENCE OF HITS and nothing else.
+ */
+export const auraCostOf = (group: GroupMask): number =>
+  (group & G.KICK) !== 0 ? AURA_COST_KICK
+    : (group & G.PUNCH) !== 0 ? AURA_COST_PUNCH
+      : 0;
+
+/** Can this fighter afford `points` of aura right now? */
+const canAfford = (f: FighterView, points: number): boolean =>
+  points <= 0 || f.aura >= points * AURA_SCALE;
+
+/** Spend, never below empty. */
+const spendAura = (f: FighterView, points: number): void => {
+  if (points <= 0) return;
+  const left = f.aura - points * AURA_SCALE;
+  f.aura = left > 0 ? left : 0;
+};
 
 /** Is the required directional hold satisfied this frame? 0 none, 2 D, 4 back, 6 fwd. */
 const dirHeld = (s: SimState, p: PlayerIx, dir: 0 | 2 | 4 | 6): boolean => {
@@ -299,7 +332,15 @@ const tryStartMove = (s: SimState, p: PlayerIx, from: CompiledMove | null): bool
     const pressFrame = inputFor(s, p, m);
     if (pressFrame < 0) continue;
 
+    // AURA. A tired fighter has to wait. The press is NOT consumed, so it can
+    // still fire on a later frame within its normal buffer window — consuming
+    // it here would read as a dropped button. It is a buffer, not a promise:
+    // past INPUT_LENIENCY the press expires like any other.
+    const cost = auraCostOf(m.group);
+    if (!canAfford(f, cost)) continue;
+
     ringConsume(s.buf, p, pressFrame, m.button);
+    spendAura(f, cost);
     startAction(s, p, m);
     if (from !== null) {
       // startAction cleared these; the CHAIN owns them, so restore them here —
@@ -402,6 +443,49 @@ const tryAirJump = (s: SimState, p: PlayerIx): boolean => {
  * route back to neutral — recovery, hitstun, blockstun, landing — can buffer a
  * jump out of itself through the one branch below.
  */
+/**
+ * THE DASH — "slide" — on a double tap of left or left, right on right.
+ *
+ * Gated twice, and both gates are the point:
+ *   MOVEMENT >= 100   a slow character does not get the mobility option at
+ *                     all, however much aura it is holding. Diablo's 90 means
+ *                     he can never dash.
+ *   AURA > 90         and it costs 10, so Caporal's 105 affords two
+ *                     (105 -> 95 -> 85) before the third is refused.
+ *
+ * Returns true when a dash started, so the caller stops deciding movement.
+ */
+const tryDash = (s: SimState, p: PlayerIx): boolean => {
+  const f = s.fighter(p);
+  const c = charOf(s, p);
+  if (c.traits.movement < DASH_MIN_MOVEMENT) return false;
+
+  const fwd = forwardBit(f);
+  const back = backBit(f);
+  const edge = ringPressEdge(s.buf, p, s.g.frame) & (fwd | back);
+  if (edge === 0) return false;
+
+  // The SECOND tap of the same direction, while the first is still warm.
+  const again = f.tapFrames > 0 && f.tapDir === edge;
+  f.tapDir = edge;
+  f.tapFrames = DOUBLE_TAP_FRAMES;
+  if (!again) return false;
+
+  // Strictly above, so a ceiling of exactly 90 can never dash.
+  if (f.aura <= AURA_DASH_MIN * AURA_SCALE) return false;
+
+  spendAura(f, AURA_COST_DASH);
+  f.tapDir = 0;
+  f.tapFrames = 0;
+
+  const forward = edge === fwd;
+  setState(f, forward ? S.DASH_F : S.DASH_B);
+  f.dashTimer = forward ? c.dashFrames : c.backDashFrames;
+  f.velX = (forward ? c.dashSpeed : -c.backDashSpeed) * f.facing;
+  pushEvent(s, Ev.DASH, p, packB(forward ? 1 : 0, SfxId.NONE), f.posX, f.posY, 0);
+  return true;
+};
+
 const groundMovement = (s: SimState, p: PlayerIx): void => {
   const f = s.fighter(p);
   const c = charOf(s, p);
@@ -416,6 +500,12 @@ const groundMovement = (s: SimState, p: PlayerIx): void => {
     startJumpSquat(s, p, held);
     return;
   }
+  // A dash outranks a walk: the same key is doing both, and the double tap is
+  // the more specific request.
+  if (f.dashTimer > 0 && (f.state === S.DASH_F || f.state === S.DASH_B)) {
+    return;                       // already dashing; physics carries it
+  }
+  if (tryDash(s, p)) return;
   if ((held & forwardBit(f)) !== 0) {
     setState(f, S.WALK_F);
     f.velX = c.walkF * f.facing;
@@ -515,6 +605,17 @@ export const resolveTransitions = (s: SimState, p: PlayerIx): void => {
         return;
       }
       if (tryStartMove(s, p, null)) return;
+      groundMovement(s, p);
+      return;
+
+    // --- the dash. Committed for its own length, and CANCELLABLE INTO AN
+    // ATTACK, which is the whole reason to spend aura closing distance: the
+    // dash is a way to get a hit out, not a way to jog. Movement input does
+    // nothing until it runs out.
+    case S.DASH_F:
+    case S.DASH_B:
+      if (tryStartMove(s, p, null)) return;
+      if (f.dashTimer > 0) return;
       groundMovement(s, p);
       return;
 

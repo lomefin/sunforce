@@ -17,14 +17,18 @@ import type {
   PoseBuffer, PoseHint, Renderer, SimState, StageDef, StateBuf,
 } from '@/core/contracts';
 import type { Material } from '@/gfx/batch';
-import { AnimId, Bone, MoveId, S } from '@/core/contracts';
+import { AURA_DASH_MIN, AURA_SCALE, AnimId, Bone, MoveId, S } from '@/core/contracts';
+import { charOf } from '@/sim/state';
 import { px } from '@/core/fixed';
 import { QuadBatch, rgbB, rgbG, rgbR, writeQuad } from '@/gfx/batch';
 import { drawDebugBoxes, toggleDebugBoxes as flipDebugBoxes } from '@/gfx/debugdraw';
 import { applyRest, createPoseBuffer, restPoseOf, setFacing, solve } from '@/gfx/skin/pose';
 import { jiggle, resetJiggle, sample } from '@/gfx/skin/anim';
 import { BASE_H, BASE_W, FightCamera, createCamera } from '@/gfx/camera';
-import { drawHealthBar, drawRoundTimer, secondsFromFrames } from '@/ui/wiphala';
+import { drawAuraBar, drawHealthBar, drawRoundTimer, secondsFromFrames } from '@/ui/wiphala';
+
+/** Slim, so the aura never competes with the health bar above it. */
+const AURA_BAR_H = 16;
 import { backdropSpecOf, createStageBackdrop } from '@/gfx/stage';
 import type { StageBackdrop } from '@/gfx/stage';
 
@@ -462,6 +466,23 @@ export class FightRenderer implements Renderer {
         leftSide: p === 0,
         z: 10,
         flash,
+      });
+
+      // AURA, beneath the health. Narrower and slimmer on purpose: it is the
+      // secondary readout and must not compete with the bar the player reads
+      // first. Its ceiling is the fighter's OWN stamina, so the bar is always
+      // "how much of mine am I holding" rather than a shared scale.
+      const maxAura = charOf(s, p).traits.stamina * AURA_SCALE;
+      const auraW = Math.round(barW * 0.62);
+      drawAuraBar(batch, {
+        x: p === 0 ? pad : BASE_W - pad - auraW,
+        y: y - AURA_BAR_H - 14,
+        w: auraW,
+        h: AURA_BAR_H,
+        frac: maxAura > 0 ? f.aura / maxAura : 0,
+        threshold: maxAura > 0 ? (AURA_DASH_MIN * AURA_SCALE) / maxAura : 1,
+        leftSide: p === 0,
+        z: 10,
       });
     }
 

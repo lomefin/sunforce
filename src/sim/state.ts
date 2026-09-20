@@ -31,7 +31,7 @@
 // =============================================================================
 
 import {
-  Contact, EVENT_CAP, EVENT_WORDS_EACH, F, FIGHTER_WORDS, GL, GLOBAL_WORDS,
+  AURA_SCALE, Contact, EVENT_CAP, EVENT_WORDS_EACH, F, FIGHTER_WORDS, GL, GLOBAL_WORDS,
   INPUT_RING_FRAMES, MoveId, OFF_EVENTS, OFF_FIGHTER, OFF_GLOBAL, OFF_RING,
   ROUND_TIME, RoundState, S, SIM_HZ, STATE_WORDS,
 } from '@/core/contracts';
@@ -50,7 +50,7 @@ import { seedFrom } from '@/core/rng';
 // -----------------------------------------------------------------------------
 assert(OFF_GLOBAL === 0, 'sim/state: OFF_GLOBAL must be 0');
 assert(OFF_FIGHTER === OFF_GLOBAL + GLOBAL_WORDS, 'sim/state: fighter slots must follow the globals');
-assert(F._pad48 <= FIGHTER_WORDS, 'sim/state: fighter fields overflow FIGHTER_WORDS');
+assert(F._pad51 <= FIGHTER_WORDS, 'sim/state: fighter fields overflow FIGHTER_WORDS');
 assert(GL._pad16 <= GLOBAL_WORDS, 'sim/state: global fields overflow GLOBAL_WORDS');
 assert(OFF_RING === OFF_FIGHTER + 2 * FIGHTER_WORDS, 'sim/state: input rings must follow the fighters');
 assert(OFF_EVENTS === OFF_RING + 2 * INPUT_RING_FRAMES, 'sim/state: event ring must follow the input rings');
@@ -109,6 +109,13 @@ class FighterViewImpl implements FighterView {
   set prevAction(v: MoveId) { this.buf[this.base + F.prevAction] = v; }
   get hp(): number { return this.buf[this.base + F.hp]!; }
   set hp(v: number) { this.buf[this.base + F.hp] = v; }
+  /** CURRENT aura in TICKS (AURA_SCALE per point), not points. */
+  get aura(): number { return this.buf[this.base + F.aura]!; }
+  set aura(v: number) { this.buf[this.base + F.aura] = v; }
+  get tapDir(): number { return this.buf[this.base + F.tapDir]!; }
+  set tapDir(v: number) { this.buf[this.base + F.tapDir] = v; }
+  get tapFrames(): number { return this.buf[this.base + F.tapFrames]!; }
+  set tapFrames(v: number) { this.buf[this.base + F.tapFrames] = v; }
   get hitstun(): number { return this.buf[this.base + F.hitstun]!; }
   set hitstun(v: number) { this.buf[this.base + F.hitstun] = v; }
   get blockstun(): number { return this.buf[this.base + F.blockstun]!; }
@@ -322,6 +329,10 @@ const resetFighter = (s: SimState, p: PlayerIx, stage: StageDef): void => {
   f.prevAction = MoveId.NONE;
 
   f.hp = c.hp;
+  // Everyone starts a round at FULL aura, and full means their own ceiling.
+  f.aura = c.traits.stamina * AURA_SCALE;
+  f.tapDir = 0;
+  f.tapFrames = 0;
   f.hitstun = 0;
   f.blockstun = 0;
   f.hitstop = 0;

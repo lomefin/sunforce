@@ -1,6 +1,9 @@
 // Headless acceptance test for the M0 game rules.
 // The sim is pure over (state, inputs), so it runs fine with no browser at all.
-import { B, CharId, MoveId, S, StageId, WALL_PAD } from '../src/core/contracts';
+import {
+  AURA_COST_BLOCK, AURA_COST_DASH, AURA_COST_KICK, AURA_COST_PUNCH, AURA_DASH_MIN,
+  AURA_SCALE, B, CharId, MoveId, S, StageId, WALL_PAD,
+} from '../src/core/contracts';
 import { fx, px } from '../src/core/fixed';
 import { charOf, createState } from '../src/sim/state';
 import { hurtBoxesOf } from '../src/sim/collision';
@@ -701,14 +704,11 @@ import { animOfState } from '../src/gfx/renderer';
   check('traits: Diablo walks slower',
     REGISTRY.chars[CharId.E]!.walkF < REGISTRY.chars[BASELINE]!.walkF, true);
 
-  // Stamina shortens the RECOVERY TAIL only — never startup, never the active
-  // window. A 105 recovers sooner than a 90 on the identical authored move.
+  // Stamina is the aura CEILING and nothing else — it no longer shortens moves,
+  // because aura owns the cadence now and one rating must not pay twice.
   const total = (id: CharId, mv: MoveId): number => REGISTRY.chars[id]!.moves[mv]!.totalFrames;
-  const startup = (id: CharId, mv: MoveId): number => REGISTRY.chars[id]!.moves[mv]!.startup;
-  check('traits: 105 stamina recovers sooner than 90',
-    total(CharId.A, MoveId.A_5K) < total(CharId.E, MoveId.E_5K), true);
-  check('traits: stamina never touches startup',
-    startup(CharId.A, MoveId.A_5K), startup(CharId.E, MoveId.E_5K));
+  check('traits: stamina does not alter move length any more',
+    total(CharId.A, MoveId.A_5K), total(CharId.E, MoveId.E_5K));
 }
 
 // =============================================================================
@@ -795,6 +795,127 @@ import { animOfState } from '../src/gfx/renderer';
     check('corner: the widest sprite still fits inside the wall',
       Math.round(widest) <= WALL_PAD, true);
     console.log(`      widest half-extent is ${Math.round(widest)}u (${where}) against WALL_PAD ${WALL_PAD}`);
+  }
+}
+
+// =============================================================================
+// AURA — the live half of stamina
+// -----------------------------------------------------------------------------
+// Stamina is the ceiling; aura is what you are holding. Attacking spends it,
+// guarding spends less, dashing spends a lot, and it trickles back at
+// `stamina / 100` points a second — which is why it is counted in ticks rather
+// than points, so that rate is an exact integer per frame.
+{
+  const pts = (ticks: number): number => ticks / AURA_SCALE;
+  const arena = (p0: CharId, p1: CharId) => {
+    const s = createState(1234, p0, p1, StageId.STAGE_1, REGISTRY);
+    s.fighter(0).posX = fx(1780);
+    s.fighter(1).posX = fx(1820);
+    s.fighter(0).facing = 1;
+    s.fighter(1).facing = -1;
+    return s;
+  };
+
+  // Everyone starts a round full, and full is their own ceiling.
+  const s0 = arena(CharId.A, CharId.E);
+  check('aura: a round starts at full', pts(s0.fighter(0).aura), 105);
+  check('aura: ...and full is the stamina rating', pts(s0.fighter(1).aura), 90);
+
+  // Spending, measured on the ONE frame the move starts. Starting mid-pool
+  // matters: regen is clipped at the ceiling, so a fighter who is already full
+  // gains nothing and a naive "add the regen back" would over-count it.
+  const spend = (id: CharId, btn: number): number => {
+    const s = arena(id, BASELINE);
+    const f = s.fighter(0);
+    const stamina = REGISTRY.chars[id]!.traits.stamina;
+    f.aura = 50 * AURA_SCALE;
+    let prev = f.aura;
+    for (let i = 0; i < 30; i++) {
+      step(s, i === 0 ? btn : 0, 0);
+      if (f.action !== MoveId.NONE) return pts(prev - f.aura + stamina);
+      prev = f.aura;
+    }
+    return -1;
+  };
+  check('aura: a punch costs 3', spend(BASELINE, B.P), AURA_COST_PUNCH);
+  check('aura: a kick costs 5', spend(BASELINE, B.K), AURA_COST_KICK);
+
+  // Guarding costs, but LESS than swinging — that is the whole rule.
+  check('aura: a block is cheaper than a punch', AURA_COST_BLOCK < AURA_COST_PUNCH, true);
+  {
+    const s = arena(BASELINE, BASELINE);
+    const d = s.fighter(1);
+    const stamina = REGISTRY.chars[BASELINE]!.traits.stamina;
+    d.aura = 50 * AURA_SCALE;
+    let prev = d.aura;
+    let cost = -1;
+    // P2 holds guard while P1 swings; measure the frame the guard connects.
+    for (let i = 0; i < 30; i++) {
+      step(s, i === 0 ? B.K : 0, B.G);
+      if (d.blockstun > 0) { cost = pts(prev - d.aura + stamina); break; }
+      prev = d.aura;
+    }
+    check('aura: blocking a hit costs exactly 1', cost, AURA_COST_BLOCK);
+    check('aura: ...and the block still prevented the damage', d.hp, 1000);
+  }
+
+  // REGEN, exact. `stamina` ticks a frame means the 10 points a dash costs come
+  // back in (100/stamina) * 10 seconds — 9.52s for a Caporal.
+  {
+    const s = arena(CharId.A, CharId.A);
+    const f = s.fighter(0);
+    f.aura = 95 * AURA_SCALE;                       // one dash down from 105
+    let frames = 0;
+    while (pts(f.aura) < 105 && frames < 2000) { step(s, 0, 0); frames++; }
+    check('aura: 10 points come back in 9.5 seconds', Math.round((frames / 60) * 10) / 10, 9.5);
+    check('aura: and it stops at the ceiling', pts(f.aura), 105);
+  }
+
+  // THE DASH. Two gates, and both of them matter.
+  const dashes = (id: CharId): number => {
+    const s = arena(id, BASELINE);
+    const f = s.fighter(0);
+    let n = 0;
+    for (let rep = 0; rep < 6; rep++) {
+      // Two taps of BACK, one frame apart, then let the dash finish.
+      step(s, B.L, 0);
+      step(s, 0, 0);
+      step(s, B.L, 0);
+      if (f.state === S.DASH_F || f.state === S.DASH_B) n++;
+      for (let i = 0; i < 30; i++) step(s, 0, 0);
+    }
+    return n;
+  };
+  check('aura: Caporal can dash twice before running dry', dashes(CharId.A), 2);
+  check('aura: a Tinku can too', dashes(CharId.C), 2);
+  // Diablo fails BOTH gates: movement 90 is under the threshold, and his
+  // ceiling of 90 is not strictly above AURA_DASH_MIN either.
+  check('aura: Diablo can never dash', dashes(CharId.E), 0);
+  check('aura: ...because he is too slow to qualify',
+    REGISTRY.chars[CharId.E]!.traits.movement < 100, true);
+  check('aura: ...and his ceiling is not above the floor either',
+    REGISTRY.chars[CharId.E]!.traits.stamina > AURA_DASH_MIN, false);
+  check('aura: a dash costs 10', AURA_COST_DASH, 10);
+
+  // AN EXHAUSTED FIGHTER WAITS — and the press is NOT eaten. The buffer keeps
+  // holding it, so the kick comes out the moment the aura arrives rather than
+  // reading as a dropped button.
+  {
+    const s = arena(BASELINE, BASELINE);
+    const f = s.fighter(0);
+    f.aura = 1 * AURA_SCALE;                        // can afford nothing
+    const before = f.aura;
+    step(s, B.K, 0);
+    check('aura: too tired to kick, so nothing comes out', f.action, MoveId.NONE);
+    // Not a point poorer: a refused move must not quietly charge for itself.
+    check('aura: ...and no aura was spent trying', f.aura >= before, true);
+    // The press was NOT CONSUMED either: still inside its buffer window, it
+    // fires the moment the pool can pay. (The window is INPUT_LENIENCY frames,
+    // not forever — a long wait expires like any other buffered input.)
+    f.aura = 50 * AURA_SCALE;
+    step(s, 0, 0);
+    check('aura: the unconsumed press fires as soon as it can be paid for',
+      f.action !== MoveId.NONE, true);
   }
 }
 

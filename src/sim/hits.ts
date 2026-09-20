@@ -36,8 +36,9 @@
 // =============================================================================
 
 import {
-  B, CLASH_PUSH, Contact, Ev, FF, Gd, JUGGLE_GRAVITY_MAX_PCT, JUGGLE_GRAVITY_STEP_PCT,
-  MoveId, RoundState, Rx, S, SfxId, SparkId,
+  AURA_COST_BLOCK, AURA_SCALE, B, CLASH_PUSH, Contact, Ev, FF, Gd,
+  JUGGLE_GRAVITY_MAX_PCT, JUGGLE_GRAVITY_STEP_PCT, MoveId, RoundState, Rx, S,
+  SfxId, SparkId,
 } from '@/core/contracts';
 import type { FX, GuardMask, PlayerIx, SimState } from '@/core/contracts';
 import { fx, fxPct } from '@/core/fixed';
@@ -393,6 +394,12 @@ const applyOne = (s: SimState, snap: PreCommit, o: Outcome): void => {
   if (def.hitstop < o.hitstop) def.hitstop = o.hitstop;
 
   if (o.blocked) {
+    // Guarding is not free, but it is CHEAPER than swinging: 1 against a
+    // punch's 3 and a kick's 5. Blocking should be the patient option, not a
+    // faster way to exhaust yourself than attacking.
+    const left = def.aura - AURA_COST_BLOCK * AURA_SCALE;
+    def.aura = left > 0 ? left : 0;
+
     def.blockstun = o.stun + STUN_CARRY;
     def.hitstun = 0;
     def.state = ds.airborne

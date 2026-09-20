@@ -699,7 +699,12 @@ export enum F {
   lastHitFrame, airJumpsUsed, dashTimer, wallTouch,
   throwTechTimer, throwHoldTimer, throwPartnerAction, armorHitsLeft,
   stunScalePct, blockHeld, jumpDir, roundWins,
-  _pad48, _pad49, _pad50, _pad51, _pad52, _pad53, _pad54, _pad55,
+  /** CURRENT aura, in ticks — see AURA_SCALE. Max is the stamina rating. */
+  aura,
+  /** Double-tap detection: the direction bit last tapped, and how long it
+   *  stays live. A dash is the second tap arriving while this is still warm. */
+  tapDir, tapFrames,
+  _pad51, _pad52, _pad53, _pad54, _pad55,
   _pad56, _pad57, _pad58, _pad59, _pad60, _pad61, _pad62, _pad63,
 }
 
@@ -731,6 +736,10 @@ export interface FighterView {
   state: S; stateFrame: number;
   action: MoveId; actionFrame: number; prevAction: MoveId;
   hp: number;
+  /** CURRENT aura, in TICKS (AURA_SCALE per point). Ceiling = stamina rating. */
+  aura: number;
+  /** Double-tap detection for the dash. */
+  tapDir: number; tapFrames: number;
   hitstun: number; blockstun: number; hitstop: number;
   knockdownTimer: number; wakeupTimer: number; landingLag: number;
   comboCount: number; comboDamage: number; juggleCount: number; gravityMulPct: number;
@@ -1314,6 +1323,49 @@ export interface MatchConfig {
  * real collision without launching either of them across the stage.
  */
 export const CLASH_PUSH = 4.0;
+
+// -----------------------------------------------------------------------------
+// AURA — the live half of stamina
+//
+// STAMINA is the base condition: a rating, static, the CEILING. AURA is what a
+// fighter actually has right now. Everyone starts a round at full aura, equal
+// to their stamina, and spends it acting: aura is what decides whether you can
+// throw the next hit or have to wait a moment.
+//
+// STORED IN TICKS, NOT POINTS, and this is the whole reason the regen is exact.
+// Aura recovers at `stamina / 100` points per second — Caporal's 105 gives
+// 1.05 points a second, so the 10 points a dash costs come back in
+// (100/105) * 10 = 9.52 seconds. Per FRAME that is stamina/6000 points, which
+// is not an integer and would drift if it were rounded every tick. Counting in
+// 1/6000ths of a point instead makes the regen exactly `stamina` ticks per
+// frame: integer, exact, and identical on every machine.
+// -----------------------------------------------------------------------------
+
+/** Ticks per aura point. SIM_HZ * 100, so regen is `stamina` ticks per frame. */
+export const AURA_SCALE = 6000;
+
+/** What an action costs, in whole aura points. */
+export const AURA_COST_PUNCH = 3;
+export const AURA_COST_KICK = 5;
+/** Taking a hit on guard. Cheaper than throwing one: blocking is the patient
+ *  option and should not exhaust you faster than attacking does. */
+export const AURA_COST_BLOCK = 1;
+export const AURA_COST_DASH = 10;
+
+/**
+ * A dash needs aura STRICTLY above this, so a fighter whose ceiling is 90 can
+ * never dash at all — which is Diablo, and is the intent: the heavy does not
+ * get the mobility option. Caporal's 105 affords two dashes (105 -> 95 -> 85)
+ * before the third is refused.
+ */
+export const AURA_DASH_MIN = 90;
+
+/** A dash also needs this much MOVEMENT rating. Slow characters cannot dash
+ *  however much aura they are holding. */
+export const DASH_MIN_MOVEMENT = 100;
+
+/** Frames a first tap stays live waiting for its partner. 1/5 of a second. */
+export const DOUBLE_TAP_FRAMES = 12;
 
 export const SIM_HZ = 60;
 export const SIM_DT_MS = 1000 / 60;

@@ -135,12 +135,57 @@ roster rated all-100 compiles to exactly the authored numbers.
   deliberately separate — Virtud is the only one who uses both knobs.
 - **weight** is mass: knockback received scales as `100/weight`, so 120 slides
   0.83x and 90 slides 1.11x. It is also what a clash divides by.
-- **stamina** shortens the attack RECOVERY TAIL only, never startup and never
-  the active window.
+- **stamina** is the CEILING of the aura pool, and nothing else. It does not
+  shorten moves — aura owns the cadence of hits, and one rating must not pay
+  twice.
 
 Ratings are percentages on plain integers, so they **round** rather than
 truncate — `50 * 95%` is 48, not 47. The `|0` rule exists to keep mirrored
 POSITIONS symmetric and no rating is a position.
+
+## Aura — the live half of stamina
+
+**Stamina** is the base condition: a rating, static, the ceiling. **Aura** is
+what a fighter is holding right now. Everyone starts a round at full aura equal
+to their stamina, and spends it acting — aura is what decides whether the next
+hit comes out or you have to wait a moment.
+
+| action | cost |
+|---|---|
+| punch | 3 |
+| kick | 5 |
+| blocking a hit | 1 |
+| dash | 10 |
+
+Blocking is deliberately the cheapest: the patient option should not exhaust you
+faster than swinging does.
+
+**Aura is stored in TICKS, not points** — `AURA_SCALE = 6000` of them per point.
+Recovery is `stamina / 100` points per second, which per frame is `stamina/6000`
+— not an integer, and it would drift if rounded every tick. Counting in
+1/6000ths makes regen exactly `stamina` ticks per frame: integer, exact,
+identical everywhere. Caporal's 105 gives 1.05 points a second, so a dash's 10
+points return in `(100/105) × 10 = 9.5s`.
+
+A refused attack does **not** consume the press, so it still fires within its
+normal buffer window once the pool can pay. It is a buffer, not a promise: past
+`INPUT_LENIENCY` the press expires like any other.
+
+## The dash (the "slide")
+
+Double-tap forward or back. Gated twice, and both gates are the point:
+
+- `movement >= 100` — a slow character never gets the option. **Diablo cannot
+  dash at all.**
+- `aura > 90`, strictly — and it costs 10, so Caporal's 105 affords two
+  (105 → 95 → 85) before the third is refused.
+
+It is **cancellable into an attack**, which is the reason to spend aura closing
+distance: a dash is a way to get a hit out, not a way to jog.
+
+The HUD shows aura as a slim gold bar under the health, with a notch at the dash
+threshold — so the gate is something you can see rather than discover by
+pressing.
 
 ## The clash
 
