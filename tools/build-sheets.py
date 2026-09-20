@@ -39,7 +39,7 @@ Idempotent: a destination newer than its source is left alone.
 
 Requires ImageMagick (`magick`) on PATH.
 """
-import json, os, re, subprocess, sys
+import json, os, re, shutil, subprocess, sys
 from collections import defaultdict
 from math import gcd
 
@@ -78,8 +78,35 @@ CLIP_RE = re.compile(r'^[a-z]+(?:-[a-z]+)*(?:-\d+)?$')
 ROSTER = {'a':'male-caporal',  'b':'female-caporal', 'c':'male-tinku',
           'd':'female-tinku',  'e':'male-diablada',  'f':'female-diablada'}
 
+# IMAGEMAGICK 7 OR 6. Version 7 ships one `magick` binary that fronts
+# everything; version 6 ships `convert` and `identify` as separate programs and
+# has no `magick` at all. Ubuntu's `imagemagick` package is STILL 6, which is
+# what the Pages workflow installs and what most Linux contributors will have,
+# so both are supported rather than making 7 a hard requirement.
+_IM7 = shutil.which('magick') is not None
+_IM6 = shutil.which('convert') is not None and shutil.which('identify') is not None
+
+def im_argv(args):
+    """The argv for one ImageMagick call, in whichever dialect is installed.
+    `args` is written the way 7 wants it — an `identify` subcommand, or a plain
+    convert-style pipeline — and is translated for 6 when that is what we have."""
+    if _IM7:
+        return ['magick'] + args
+    if args and args[0] == 'identify':
+        return ['identify'] + args[1:]
+    return ['convert'] + args
+
+def require_imagemagick():
+    if _IM7 or _IM6:
+        return
+    sys.exit(
+        'build-sheets: ImageMagick not found.\n'
+        '  macOS         brew install imagemagick\n'
+        '  Debian/Ubuntu sudo apt install imagemagick\n'
+        'Needs either the v7 `magick` binary or the v6 `convert` + `identify` pair.')
+
 def mg(args):
-    return subprocess.run(['magick']+args, capture_output=True, text=True).stdout.strip()
+    return subprocess.run(im_argv(args), capture_output=True, text=True).stdout.strip()
 
 def bbox(path, crop=None):
     a = [path] + (['-crop', crop, '+repage'] if crop else [])
@@ -121,8 +148,8 @@ def stage_portraits():
                       f'assets/portraits/ (shipped anyway)')
             dst = os.path.join(PORTRAIT_OUT, f'{m.group(1)}-{m.group(2)}.png')
             tmp = dst[:-4] + '.tmp.png'
-            subprocess.run(['magick', os.path.join(root, fn),
-                            '-resize', f'{PORTRAIT_W}x>', tmp], check=True)
+            subprocess.run(im_argv([os.path.join(root, fn),
+                            '-resize', f'{PORTRAIT_W}x>', tmp]), check=True)
             os.replace(tmp, dst)
             made.append((m.group(1), m.group(2), mg(['identify', '-format', '%wx%h', dst])))
     if made:
@@ -180,10 +207,10 @@ def build(costume, clips):
     for name in sorted(meas):
         i = meas[name]
         out = f'{tmp}/{costume}-{name}.png'
-        subprocess.run(['magick', i['path'],
+        subprocess.run(im_argv([i['path'],
             '-crop', f"{i['w']}x{i['h']}+{i['x']}+{i['y']}", '+repage',
             '-channel','A','-level',f'{ALPHA_FLOOR},100%','+channel',
-            '-resize', f'{SCALE*100}%', out], check=True, capture_output=True)
+            '-resize', f'{SCALE*100}%', out]), check=True, capture_output=True)
         w,h = map(int, mg(['identify','-format','%wx%h',out]).split('x'))
         oy_abs = (i['head_top'] + base_h) if i['air'] else i['sole']
         frames.append(dict(name=name, file=out, w=w, h=h,
@@ -211,7 +238,7 @@ def build(costume, clips):
     # keep a .png extension on the temp file: ImageMagick picks the encoder
     # from the extension, and ".png.tmp" makes it fail outright.
     tmp_png = dst[:-4] + '.tmp.png'
-    subprocess.run(['magick']+args+[tmp_png], check=True)
+    subprocess.run(im_argv(args+[tmp_png]), check=True)
     os.replace(tmp_png, dst)
 
     by = {f['name']: f for f in frames}
@@ -346,8 +373,8 @@ def stage_backgrounds():
         fresh = (os.path.exists(dst)
                  and os.path.getmtime(dst) >= os.path.getmtime(src))
         if not fresh:
-            r = subprocess.run(['magick', src, '-background', 'black',
-                                '-alpha', 'remove', '-alpha', 'off', '-strip', dst],
+            r = subprocess.run(im_argv([src, '-background', 'black',
+                                '-alpha', 'remove', '-alpha', 'off', '-strip', dst]),
                                capture_output=True, text=True)
             if r.returncode != 0:
                 first = (r.stderr.strip().splitlines() or ['magick failed'])[0]
@@ -357,6 +384,9 @@ def stage_backgrounds():
               f'/art/stages/{fn} [{"up to date" if fresh else "written"}]')
 
 def main():
+    # Fail here, with instructions, rather than inside a subprocess call with a
+    # FileNotFoundError traceback thirty lines deep.
+    require_imagemagick()
     os.makedirs(OUT, exist_ok=True)
 
     print('stage backgrounds:')

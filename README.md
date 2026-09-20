@@ -10,7 +10,8 @@ player against the CPU.
 
 ## Play it
 
-**In a browser:** https://lomefin.github.io/sunforce/
+**In a browser:** http://leonardo.luarte.cl/sunforce/
+(also reachable at https://lomefin.github.io/sunforce/)
 
 **From the zip:** download `sunforce-web.zip` from the
 [Releases page](https://github.com/lomefin/sunforce/releases), unzip it, and read
@@ -93,7 +94,7 @@ noticeably higher and hangs longer.
 |---|---|
 | **Node 20+** | the dev server and the bundler |
 | **Python 3** | `tools/build-sheets.py`, the art pipeline |
-| **ImageMagick 7** (`magick`) | trimming and packing the sprite atlases |
+| **ImageMagick** 6 or 7 | trimming and packing the sprite atlases |
 
 ```bash
 # macOS
