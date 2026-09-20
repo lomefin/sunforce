@@ -1,10 +1,13 @@
 // =============================================================================
 // SunForce — src/data/troupes.ts
-// WHICH TRACK PLAYS, AND WHEN "GO" LANDS ON IT.
+// WHAT THE FIGHT WEARS: the track, the backdrop, and when "GO" lands.
 //
-// The fight's music is not a property of the stage. It is a property of the
-// TROUPE PLAYER TWO BELONGS TO: face a Diablada and you fight to a Diablada
-// track, on the same backdrop. Six characters, three troupes, three tracks.
+// None of it is a property of the stage. All of it is a property of the TROUPE
+// PLAYER TWO BELONGS TO: face a Diablada and you fight to a Diablada track, in
+// front of a Diablada panorama. Six characters, three troupes.
+//
+// A troupe with no backdrop of its own keeps the stage's, which is where Caporal
+// still is — so this is additive, not a fork of the stage system.
 //
 // WHY PLAYER TWO AND NOT PLAYER ONE
 //   Player one is the one being answered. In 1P the CPU opponent is drawn at
@@ -36,7 +39,7 @@
 // PURE DATA. Nothing here reads SimState, allocates per frame, or is hashed.
 // =============================================================================
 
-import type { CharId, DefRegistry } from '@/core/contracts';
+import type { CharId, DefRegistry, StageDef } from '@/core/contracts';
 import { charById } from '@/data/registry';
 
 /** One troupe's fight music, and where its countdown lands. */
@@ -51,6 +54,16 @@ export interface TroupeTheme {
    * fade and the three counted beats cannot be compressed.
    */
   readonly goAtMs: number;
+  /**
+   * The panorama this troupe fights in front of, as a StageLayer texture path
+   * (`stages/<file>.png`, resolved under public/art/). Absent means the stage
+   * keeps its own backdrop — which is still the case for Caporal.
+   *
+   * Only the ART changes. The geometry, the walls, the ceiling and the camera
+   * bounds are the stage's and stay the stage's, so a backdrop swap can never
+   * move a wall or desync anything: see `stageForTroupe`.
+   */
+  readonly backdrop?: string;
 }
 
 /**
@@ -67,9 +80,14 @@ export const DEFAULT_GO_AT_MS = 3000;
  */
 export const TROUPE_THEMES: readonly TroupeTheme[] = [
   { troupe: 'Caporal', musicId: 'stage-caporal', goAtMs: DEFAULT_GO_AT_MS },
-  { troupe: 'Tinku', musicId: 'stage-tinku', goAtMs: DEFAULT_GO_AT_MS },
+  { troupe: 'Tinku', musicId: 'stage-tinku', goAtMs: DEFAULT_GO_AT_MS, backdrop: 'stages/stage-tinku.png' },
   // Six seconds in: this recording opens long, and the countdown waits for it.
-  { troupe: 'Diablada', musicId: 'stage-diablada', goAtMs: 6000 },
+  {
+    troupe: 'Diablada',
+    musicId: 'stage-diablada',
+    goAtMs: 6000,
+    backdrop: 'stages/stage-diablada.png',
+  },
 ];
 
 /** Comparison key. A troupe is authored prose — trim it and fold the case. */
@@ -94,3 +112,20 @@ export const themeOfTroupe = (troupe: string): TroupeTheme | null =>
  */
 export const themeForOpponent = (reg: DefRegistry, p2: CharId): TroupeTheme | null =>
   themeOfTroupe(charById(reg, p2).def.dance);
+
+/**
+ * `base` wearing the troupe's backdrop, or `base` itself when the troupe has
+ * none. ONLY the panorama layer's texture is replaced — every number the sim or
+ * the camera reads (width, wallPad, ceiling, startX) is passed through
+ * untouched, so this is dressing and nothing else.
+ *
+ * Returned as a plain object rather than mutated: StageDefs are shared, deeply
+ * readonly module constants, and one fight must not repaint another's.
+ */
+export const stageForTroupe = (base: StageDef, theme: TroupeTheme | null): StageDef => {
+  const art = theme?.backdrop;
+  if (art === undefined || art === '') return base;
+  const first = base.layers[0];
+  if (first === undefined) return base;
+  return { ...base, layers: [{ ...first, texture: art }, ...base.layers.slice(1)] };
+};

@@ -6,13 +6,16 @@ import { charOf, createState } from '../src/sim/state';
 import { hurtBoxesOf } from '../src/sim/collision';
 import { step } from '../src/sim/step';
 import { REGISTRY } from '../src/data/registry';
+import { existsSync } from 'node:fs';
 import { layoutText, measureText } from '../src/ui/font';
 import { MODE_TEXT_BOXES } from '../src/ui/mode';
 import {
   INTRO_BEAT_FRAMES, INTRO_FADE_FRAMES, INTRO_MIN_GO_AT_MS, IntroPhase,
   introPhaseAt, introPhaseFrames, introTimingFor,
 } from '../src/ui/intro';
-import { DEFAULT_GO_AT_MS, TROUPE_THEMES, themeForOpponent } from '../src/data/troupes';
+import {
+  DEFAULT_GO_AT_MS, TROUPE_THEMES, stageForTroupe, themeForOpponent,
+} from '../src/data/troupes';
 
 let failures = 0;
 const check = (label: string, got: unknown, want: unknown): void => {
@@ -435,6 +438,48 @@ import { animOfState } from '../src/gfx/renderer';
   // the fade and the three beats are the game's rhythm, not the recording's.
   check('intro: an early downbeat clamps to the floor',
     introTimingFor(0).totalFrames, base.totalFrames);
+
+  // THE BACKDROP IS DRESSING, AND ONLY DRESSING. A troupe may bring its own
+  // panorama to a shared stage, but it must not be able to move a wall: if
+  // `stageForTroupe` ever touched geometry, a fight would desync from its own
+  // replay while looking perfectly fine on screen.
+  const stage1 = REGISTRY.stages[StageId.STAGE_1]!;
+  const diaTheme = themeForOpponent(REGISTRY, CharId.E);
+  const capTheme = themeForOpponent(REGISTRY, CharId.A);
+  const dressed = stageForTroupe(stage1, diaTheme);
+  const plain = stageForTroupe(stage1, capTheme);
+
+  check('stage dressing: diablada brings its own backdrop',
+    dressed.layers[0]?.texture, 'stages/stage-diablada.png');
+
+  // A declared backdrop that is not on disk is a black screen with a countdown
+  // over it, and nothing else in the build would say so. `npm run sheets`
+  // stages assets/backgrounds/*.png into public/art/stages/.
+  const missingArt = TROUPE_THEMES
+    .filter((t) => t.backdrop !== undefined)
+    .filter((t) => !existsSync(`public/art/${t.backdrop}`))
+    .map((t) => `${t.troupe} -> ${t.backdrop}`);
+  check('stage dressing: every declared backdrop is built', missingArt.join(', '), '');
+  check('stage dressing: a troupe without one keeps the stage\'s', plain, stage1);
+  check('stage dressing: null theme is identity', stageForTroupe(stage1, null), stage1);
+  check('stage dressing: the stage1 def is never mutated',
+    stage1.layers[0]?.texture, 'stages/stage-1.png');
+
+  const sameGeometry = dressed.width === stage1.width
+    && dressed.wallPad === stage1.wallPad
+    && dressed.ceiling === stage1.ceiling
+    && dressed.startX[0] === stage1.startX[0]
+    && dressed.startX[1] === stage1.startX[1]
+    && dressed.id === stage1.id
+    && dressed.layers.length === stage1.layers.length;
+  check('stage dressing: geometry is untouched', sameGeometry, true);
+
+  // Only the texture differs on the swapped layer — parallax, scale and offset
+  // are the stage's, so the panorama sits exactly where the old one sat.
+  const L0 = stage1.layers[0]!;
+  const D0 = dressed.layers[0]!;
+  check('stage dressing: the layer keeps its parallax and scale',
+    D0.parallax === L0.parallax && D0.scale === L0.scale && D0.yOffset === L0.yOffset, true);
 
   // Every registered track must be timeable — no negative or fractional holds.
   const sane = TROUPE_THEMES.every((t) => {

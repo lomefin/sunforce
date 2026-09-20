@@ -119,8 +119,8 @@ console warning — never a crash. Replacing a track is a file swap and nothing
 else, which is why `select.mp3` can be changed without touching code.
 
 **Fight music follows the troupe of the character on the RIGHT** — player two.
-Six characters, three troupes, three tracks; all three currently share one
-backdrop. `src/data/troupes.ts` is the whole mapping.
+Six characters, three troupes, three tracks. `src/data/troupes.ts` is the whole
+mapping, and it carries the backdrop too (see below).
 
 **Each track says when "GO" lands on it.** `TroupeTheme.goAtMs` is measured from
 the first frame of the intro, which is also when the track starts, so `6000`
@@ -130,6 +130,19 @@ shortens the fade, so a track can be given a later downbeat but never an earlier
 one than `INTRO_MIN_GO_AT_MS` (3000 ms). The fight scene waits on the frame 0
 for the track to actually start before counting, so the countdown and the
 recording agree about where zero is.
+
+## Stage dressing — the troupe brings its own
+
+A `TroupeTheme` carries the music id, the GO time and optionally a **backdrop**.
+The fight scene hands the dressed StageDef to `Renderer.setStageDressing`, which
+is **presentation only**: only the panorama layer's texture is replaced, so the
+width, wallPad, ceiling and startX the sim reads are the stage's own and can
+never move. The sim is not told and no hash shifts.
+
+Backdrops live in `assets/backgrounds/` and are staged by `npm run sheets`. All
+of them must be **3:1** (2172x724 today) — the stage geometry assumes it.
+`npm run check` asserts every declared backdrop is actually built, because a
+missing one is a black screen with a countdown over it and nothing else warns.
 
 ## Art folders — what goes where
 

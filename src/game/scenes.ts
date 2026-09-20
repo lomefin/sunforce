@@ -60,7 +60,7 @@ import {
   DEFAULT_INTRO_TIMING, INTRO_SYNC_WAIT_FRAMES, drawIntro, introTimingFor,
 } from '@/ui/intro';
 import type { IntroTiming } from '@/ui/intro';
-import { themeForOpponent } from '@/data/troupes';
+import { stageForTroupe, themeForOpponent } from '@/data/troupes';
 import {
   DEFAULT_MATCH, MatchEndWatch, ONE_PLAYER, TWO_PLAYER,
   configForMode, createMatch, modeOf,
@@ -220,9 +220,13 @@ class FightScene implements Scene {
     // share one stage today. A troupe with no track of its own falls back to
     // whatever the StageDef declares, and to the default 3.5 s countdown.
     const theme = themeForOpponent(this.deps.registry, m.cfg.chars[1]);
+    const stage = this.deps.registry.stages[m.cfg.stage]!;
     // The theme comes up UNDER the 750 ms fade, so the music is already running
     // by the time the first numeral lands.
-    this.deps.music?.stageTheme(this.deps.registry.stages[m.cfg.stage]!, theme?.musicId);
+    this.deps.music?.stageTheme(stage, theme?.musicId);
+    // ...and the troupe's panorama with it, when it has one. Art only: the
+    // sim still runs on `stage`, walls and all, and is never told.
+    this.deps.renderer.setStageDressing?.(stageForTroupe(stage, theme));
 
     this.overlay = overlayHostOf(this.deps.renderer);
     this.introFrame = 0;
@@ -282,6 +286,8 @@ class FightScene implements Scene {
     this.match?.dispose();
     this.match = null;
     this.overlay = null;
+    // Leave no troupe's backdrop behind for the next fight to inherit.
+    this.deps.renderer.setStageDressing?.(null);
   }
 }
 

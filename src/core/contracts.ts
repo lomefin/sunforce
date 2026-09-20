@@ -1217,6 +1217,16 @@ export interface Renderer {
   /** THE ONLY place gl.draw* is called. */
   draw(s: SimState, prev: StateBuf, alpha: number, dtMs: number): void;
   setSkin(p: PlayerIx, skin: CharacterSkin): void;
+  /**
+   * PRESENTATION-ONLY stage dressing: draw this StageDef's art instead of the
+   * one `SimState` names, until cleared with null. The fight scene uses it so a
+   * troupe can bring its own backdrop to a shared stage (src/data/troupes.ts).
+   *
+   * The sim is not told and MUST NOT be: the override is required to differ
+   * from the real stage in art alone, so nothing it changes can reach a
+   * pushbox, a wall or a hash. Optional, so a cut-down renderer can omit it.
+   */
+  setStageDressing?(def: StageDef | null): void;
   toggleDebugBoxes(): void;
   dispose(): void;
 }

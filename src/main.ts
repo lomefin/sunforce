@@ -16,7 +16,7 @@ import { REGISTRY } from '@/data/registry';
 import { createGlHost, showFatal } from '@/gfx/gl';
 import { createRenderer } from '@/gfx/renderer';
 import { backdropSpecOf } from '@/gfx/stage';
-import { acquireTexture } from '@/gfx/texture';
+import { acquireTexture, assetUrl } from '@/gfx/texture';
 import { attachDebugHotkeys } from '@/gfx/debugdraw';
 import { keyboardPair } from '@/input/sources';
 import { createAudioGraph } from '@/audio/graph';
@@ -54,7 +54,12 @@ const boot = async (): Promise<void> => {
   // texture decodes — for a multi-megabyte panorama that is several visible
   // seconds of placeholder. acquireTexture refcounts by URL, so the renderer's
   // own later acquire is a cache hit, not a second fetch.
-  await acquireTexture(host.gl, backdropSpecOf(REGISTRY.stages[BOOT_MATCH.stage]!).image);
+  // assetUrl, because gfx/texture.ts keys its cache on the STRING it is handed
+  // and StageBackdrop acquires the ABSOLUTE url. Preloading the relative path
+  // warmed a different entry and the panorama was uploaded to the GPU twice.
+  await acquireTexture(
+    host.gl, assetUrl(backdropSpecOf(REGISTRY.stages[BOOT_MATCH.stage]!).image),
+  );
 
   const { sources } = keyboardPair();
   attachDebugHotkeys(window);
@@ -97,6 +102,18 @@ const boot = async (): Promise<void> => {
   void (async () => {
     const { preloadPortraits } = await import('@/ui/select');
     await preloadPortraits(host.gl);
+    // The troupe panoramas, for the same reason: the backdrop swaps when the
+    // opponent's troupe brings its own art, and a 2.8 MB PNG decoded on the
+    // first frame of a fight is a black screen with a countdown over it.
+    // Refcounted by URL, so this is a warm cache and not a second copy.
+    const { TROUPE_THEMES, stageForTroupe } = await import('@/data/troupes');
+    const base = REGISTRY.stages[BOOT_MATCH.stage]!;
+    for (const t of TROUPE_THEMES) {
+      if (t.backdrop === undefined) continue;
+      // Resolved the same way StageBackdrop resolves it, so this warms the very
+      // entry the renderer will ask for rather than a near-miss beside it.
+      await acquireTexture(host.gl, assetUrl(backdropSpecOf(stageForTroupe(base, t)).image));
+    }
   })().catch(() => undefined);
 
   hideBoot();

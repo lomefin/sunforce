@@ -25,7 +25,7 @@ import { applyRest, createPoseBuffer, restPoseOf, setFacing, solve } from '@/gfx
 import { jiggle, resetJiggle, sample } from '@/gfx/skin/anim';
 import { BASE_H, BASE_W, FightCamera, createCamera } from '@/gfx/camera';
 import { drawHealthBar, drawRoundTimer, secondsFromFrames } from '@/ui/wiphala';
-import { createStageBackdrop } from '@/gfx/stage';
+import { backdropSpecOf, createStageBackdrop } from '@/gfx/stage';
 import type { StageBackdrop } from '@/gfx/stage';
 
 /** Used when a fighter is idle and no move is driving the pose. */
@@ -131,6 +131,8 @@ export class FightRenderer implements Renderer {
   private viewW = 1920;
   private viewH = 1080;
   private backdrop: StageBackdrop | null = null;
+  /** Presentation-only stage art override; see `setStageDressing`. */
+  private dressing: StageDef | null = null;
   private frontIx: PlayerIx = 0;
   private lastEpoch = -1;
 
@@ -151,6 +153,32 @@ export class FightRenderer implements Renderer {
     this.viewH = Math.max(1, Math.round(cssH * dpr));
   }
 
+  /**
+   * Draw `def`'s art instead of the stage `SimState` names, until cleared with
+   * null. The fight scene sets it so a troupe can bring its own panorama to a
+   * shared stage; the sim is never told, and the override differs in art alone.
+   *
+   * Dropping the backdrop here rather than comparing images every frame keeps
+   * the draw loop allocation-free: this is called once when a fight is entered,
+   * and the next `draw` rebuilds from whichever def is then current.
+   */
+  setStageDressing(def: StageDef | null): void {
+    const had = this.dressing !== null;
+    this.dressing = def;
+
+    // Rebuild only when the ART actually changes. `stageForTroupe` hands back a
+    // FRESH object on every fight entry, so comparing identity here would miss
+    // every time and re-upload a 2 MB panorama per match — which showed as a
+    // couple of seconds of black while the texture decoded.
+    const want = def === null ? null : backdropSpecOf(def).image;
+    const showing = this.backdrop?.spec.image ?? null;
+    if (want !== null && want === showing) return;
+    if (want === null && !had) return;
+
+    this.backdrop?.dispose();
+    this.backdrop = null;
+  }
+
   setSkin(p: PlayerIx, skin: CharacterSkin): void {
     const side = this.sides[p];
     if (side.skin !== null && side.skin !== skin) side.skin.dispose();
@@ -167,7 +195,9 @@ export class FightRenderer implements Renderer {
     const batch = this.batch;
     if (gl === null || batch === null) return;
 
-    const stage = s.defs.stages[s.g.stageId]!;
+    // Art only: the camera bounds, walls and lighting below read exactly the
+    // numbers they would have read without any dressing.
+    const stage = this.dressing ?? s.defs.stages[s.g.stageId]!;
 
     if (this.backdrop === null || this.backdrop.stageId !== stage.id) {
       this.backdrop?.dispose();
