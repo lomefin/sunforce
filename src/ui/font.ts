@@ -254,6 +254,171 @@ export const drawText = (
   return width;
 };
 
+// -----------------------------------------------------------------------------
+// Fitting text to a BOX
+// -----------------------------------------------------------------------------
+// WHY THIS EXISTS. `drawText` takes a size and an anchor and will cheerfully
+// draw a 947px string straight through the middle of a 700px card — which is
+// precisely what the mode screen did, because a call site cannot see a width it
+// never computed. Every label was one edit away from a silent layout bug, and
+// the only thing catching them was somebody looking at the screen.
+//
+// So a caller that HAS a box says so, and the box wins. The text wraps at word
+// boundaries to fill it; if wrapping alone will not fit the line budget, the
+// size steps down until it does. Both knobs are bounded, so the outcome is
+// either readable or visibly truncated — never quietly over the edge.
+//
+// The anchor stays what it is everywhere else in this file: `(x, y)` is the
+// BASELINE of the FIRST line, and subsequent lines descend (y decreasing, since
+// y is UP). A one-line box therefore draws in exactly the place the same call
+// to `drawText` would have.
+
+export interface BoxOpts extends TextOpts {
+  /** Hard ceiling on the width of every line. Never exceeded. */
+  readonly maxWidth: number;
+  /** Lines the block may occupy; default 1 — shrink to fit, do not wrap. */
+  readonly maxLines?: number;
+  /** Extra px between one baseline and the next; default size * 0.3. */
+  readonly leading?: number;
+  /** Floor for the auto-shrink; default 8, below which text stops being text. */
+  readonly minSize?: number;
+}
+
+export interface TextLayout {
+  /** The lines, in reading order. Never more than `maxLines`. */
+  readonly lines: readonly string[];
+  /** The size they fit at — `opts.size`, unless shrinking was needed. */
+  readonly size: number;
+  /** Baseline-to-baseline distance, downward. */
+  readonly step: number;
+  /** Width of the widest line. */
+  readonly width: number;
+  /** Cap of the first line down to the baseline of the last. */
+  readonly height: number;
+  /** The box could not be honoured at the requested size: the text was shrunk,
+   *  truncated, or both. A caller that cares can assert on this in a test. */
+  readonly clipped: boolean;
+}
+
+/**
+ * Greedy word wrap under `m`. A '\n' is the author's own break and is always
+ * honoured. A single word wider than the whole box is broken mid-word: an ugly
+ * break is strictly better than a box that silently is not a box.
+ */
+const wrapAt = (text: string, maxWidth: number, m: Metrics): string[] => {
+  const lines: string[] = [];
+  const fits = (n: number): boolean => widthOf(n, m) <= maxWidth;
+
+  const pushBroken = (word: string): void => {
+    let rest = word;
+    while (rest.length > 0) {
+      let n = rest.length;
+      while (n > 1 && !fits(n)) n--;
+      lines.push(rest.slice(0, n));
+      rest = rest.slice(n);
+    }
+  };
+
+  for (const para of text.split('\n')) {
+    // Whole line fits: hand it back VERBATIM. Re-joining on single spaces would
+    // silently eat the run of spaces a caller used as a column separator — the
+    // footer hint spaces its three key groups apart exactly that way.
+    if (fits(para.length)) { lines.push(para); continue; }
+    let line = '';
+    for (const word of para.split(' ')) {
+      if (word.length === 0) continue; // runs of spaces collapse to one break
+      const probe = line.length === 0 ? word : `${line} ${word}`;
+      if (fits(probe.length)) { line = probe; continue; }
+      if (line.length > 0) { lines.push(line); line = ''; }
+      if (fits(word.length)) { line = word; continue; }
+      // Too wide even alone. Break it, then carry its tail as the open line so
+      // the words after it can still share that last fragment's row.
+      pushBroken(word);
+      line = lines.pop() ?? '';
+    }
+    lines.push(line);
+  }
+  return lines;
+};
+
+/**
+ * Where `text` lands inside `maxWidth`, at what size, on how many lines. Pure:
+ * it touches no GL and emits nothing, so a headless test can assert that a
+ * screen's labels fit their panels without a browser. `drawTextBox` is this
+ * function plus the draw calls, so what a test measures is what a player sees.
+ */
+export const layoutText = (text: string, o: BoxOpts): TextLayout => {
+  const want = o.size ?? 16;
+  const minSize = Math.max(1, o.minSize ?? 8);
+  const maxLines = Math.max(1, Math.floor(o.maxLines ?? 1));
+  const maxWidth = Math.max(0, o.maxWidth);
+
+  // Tracking is a RATIO of the size, so it shrinks with it. An explicit
+  // tracking that stayed fixed while the size fell would fight the fit and, at
+  // small sizes, turn a title into spaced-out confetti.
+  const metricsAt = (size: number): Metrics => metricsOf({
+    ...o,
+    size,
+    tracking: o.tracking === undefined ? undefined : o.tracking * (size / want),
+  });
+
+  let size = want;
+  let lines = wrapAt(text, maxWidth, metricsAt(size));
+  // One px at a time. The range is a few dozen at worst, and stepping beats a
+  // binary search that can settle on a size whose wrap is a line worse.
+  while (lines.length > maxLines && size > minSize) {
+    size -= 1;
+    lines = wrapAt(text, maxWidth, metricsAt(size));
+  }
+
+  const overflowed = lines.length > maxLines;
+  if (overflowed) {
+    // Out of room even at minSize. Truncate, and SAY so on the glyph line with
+    // an ellipsis, because text that vanished without a trace is the bug this
+    // whole section exists to prevent.
+    const m = metricsAt(size);
+    lines = lines.slice(0, maxLines);
+    const last = lines[maxLines - 1] ?? '';
+    let n = last.length;
+    while (n > 0 && widthOf(n + 3, m) > maxWidth) n--;
+    lines[maxLines - 1] = `${last.slice(0, n)}...`;
+  }
+
+  const m = metricsAt(size);
+  const step = size + (o.leading ?? size * 0.3);
+  let width = 0;
+  for (const line of lines) width = Math.max(width, widthOf(line.length, m));
+
+  return {
+    lines,
+    size,
+    step,
+    width,
+    height: size + (lines.length - 1) * step,
+    clipped: overflowed || size < want,
+  };
+};
+
+/**
+ * `drawText`, but obeying a box. `(x, y)` is the first line's baseline and
+ * `align` applies per line about `x`, so a centred block centres every row.
+ * Returns the layout it drew, which is exactly `layoutText(text, o)`.
+ */
+export const drawTextBox = (
+  out: InstanceWriter,
+  text: string,
+  x: number, y: number,
+  o: BoxOpts,
+): TextLayout => {
+  const L = layoutText(text, o);
+  const want = o.size ?? 16;
+  const tracking = o.tracking === undefined ? undefined : o.tracking * (L.size / want);
+  for (let i = 0; i < L.lines.length; i++) {
+    drawText(out, L.lines[i]!, x, y - i * L.step, { ...o, size: L.size, tracking });
+  }
+  return L;
+};
+
 // =============================================================================
 // COST, measured rather than guessed
 // -----------------------------------------------------------------------------
