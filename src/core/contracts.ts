@@ -1322,7 +1322,21 @@ export const MAX_DELTA_MS = 250;
 
 /** World. 3600 units wide = 1.875 logical screens. */
 export const STAGE_WIDTH = 3600;
-export const WALL_PAD = 90;
+/**
+ * How far the walls sit INSIDE the stage, world units.
+ *
+ * It is a RENDERING constraint before it is a gameplay one. The camera clamps
+ * its view to [0, STAGE_WIDTH], so a fighter pinned at the wall is drawn at
+ * exactly `WALL_PAD` from the view's edge — and a sprite is far wider than the
+ * pushbox it is anchored by. The widest frame in the roster (Machona's 5K)
+ * reaches 230 units behind her origin, so at the old 90 a cornered fighter had
+ * 140 units of herself cut off by the edge of the screen.
+ *
+ * 240 is that 230 plus a little air. Raising it costs 300 units of the 3600
+ * the fighters can actually use, which is the right trade: a corner you cannot
+ * see is worse than a slightly smaller stage.
+ */
+export const WALL_PAD = 240;
 export const CEILING = 900;
 export const LOGICAL_W = 1920;
 export const LOGICAL_H = 1080;

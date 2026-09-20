@@ -42,6 +42,10 @@ over 200 frames, pushbox separation and wall clamping.
 **No numpad anywhere** — the bindings must work on a laptop / tenkeyless keyboard. Each
 player's attacks sit under the hand already resting on their movement keys.
 
+**Guard already has a key** — `G` for P1, `P` for P2 — and holding BACK also
+guards (`sim/hits.ts` derives `blockHeld` from either). Blocking is fully
+implemented; it is simply not advertised anywhere on the fight screen.
+
 `F1` toggles the hit / hurt / push box overlay.
 
 ## Rules (fixed — do not "improve" these)

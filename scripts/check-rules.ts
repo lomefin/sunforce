@@ -1,6 +1,6 @@
 // Headless acceptance test for the M0 game rules.
 // The sim is pure over (state, inputs), so it runs fine with no browser at all.
-import { B, CharId, MoveId, S, StageId } from '../src/core/contracts';
+import { B, CharId, MoveId, S, StageId, WALL_PAD } from '../src/core/contracts';
 import { fx, px } from '../src/core/fixed';
 import { charOf, createState } from '../src/sim/state';
 import { hurtBoxesOf } from '../src/sim/collision';
@@ -762,6 +762,40 @@ import { animOfState } from '../src/gfx/renderer';
     s2.fighter(0).hitstun + s2.fighter(1).hitstun, 0);
   check('clash: both are interrupted out of their attack',
     s2.fighter(0).action + s2.fighter(1).action, MoveId.NONE + MoveId.NONE);
+}
+
+// =============================================================================
+// A CORNERED FIGHTER MUST STILL BE ON SCREEN
+// -----------------------------------------------------------------------------
+// The camera clamps its view to [0, STAGE_WIDTH], so a fighter pinned at the
+// wall is drawn exactly WALL_PAD from the edge of the screen — and a sprite is
+// much wider than the pushbox it hangs off. At WALL_PAD 90 the widest frame in
+// the roster had 140 units of itself outside the view, which reads in game as
+// the character disappearing into the edge.
+{
+  if (!existsSync('public/art/a.sheet.json')) {
+    console.log('SKIP  corner: sheets not built — run `npm run sheets`');
+  } else {
+    let widest = 0;
+    let where = '';
+    for (const slot of ['a', 'b', 'c', 'd', 'e', 'f']) {
+      const sheet = JSON.parse(readFileSync(`public/art/${slot}.sheet.json`, 'utf8')) as {
+        unitsPerPx: number;
+        clips: Record<string, { frames: { uv: number[]; origin: number[] }[] }>;
+      };
+      for (const [clip, c] of Object.entries(sheet.clips)) {
+        for (const fr of c.frames) {
+          const w = fr.uv[2]! * sheet.unitsPerPx;
+          const ox = fr.origin[0]! * sheet.unitsPerPx;
+          const half = Math.max(ox, w - ox);
+          if (half > widest) { widest = half; where = `${slot}.${clip}`; }
+        }
+      }
+    }
+    check('corner: the widest sprite still fits inside the wall',
+      Math.round(widest) <= WALL_PAD, true);
+    console.log(`      widest half-extent is ${Math.round(widest)}u (${where}) against WALL_PAD ${WALL_PAD}`);
+  }
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
