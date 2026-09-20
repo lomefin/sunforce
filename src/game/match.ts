@@ -35,6 +35,7 @@ import { ROUND_TIME, ROUNDS_TO_WIN } from '@/core/contracts';
 import type {
   DefRegistry, InputSource, MatchConfig, PlayerIx, Renderer, SimState, StateBuf,
 } from '@/core/contracts';
+import type { SceneMusic } from '@/audio/scene-music';
 import { allocStateBuffer, createState, snapshot } from '@/sim/state';
 import { step } from '@/sim/step';
 import {
@@ -49,6 +50,9 @@ export interface GameDeps {
   readonly gl: WebGL2RenderingContext;
   readonly renderer: Renderer;
   readonly registry: DefRegistry;
+  /** Optional: absent in a headless or muted build, and every call site is
+   *  then a no-op. The scenes decide WHAT plays; the facade decides HOW. */
+  readonly music?: SceneMusic;
 }
 
 /** The stick look M0 shipped with. Kept here so every match looks the same. */

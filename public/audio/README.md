@@ -51,3 +51,13 @@ Same fallback rule: missing means silent, never broken.
 Buses are `master -> limiter`, with `music`, `sfx`, `hit`, `voice`, `foley` and `ambience`
 feeding in. Music ducks under big hits via a manual gain envelope, so a kick punches through
 the mix without the music audibly pumping.
+
+## Menu / select-screen music
+
+```
+public/audio/music/select.mp3
+```
+
+Same loader and the same fallback rules as a stage track — it is just a different
+`musicId`. It currently ships as a **copy of `stage-1.mp3`** purely as a placeholder:
+replace the file with the real selection theme and nothing in the code changes.

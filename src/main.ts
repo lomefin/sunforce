@@ -22,8 +22,10 @@ import { keyboardPair } from '@/input/sources';
 import { createAudioGraph } from '@/audio/graph';
 import { createAudioLoader } from '@/audio/load';
 import { createMusicPlayer } from '@/audio/music';
+import { createSceneMusic } from '@/audio/scene-music';
 import { startLoopWith } from '@/core/loop';
 import { DEFAULT_MATCH, makeMatchConfig } from '@/game/match';
+import type { SceneMusic } from '@/audio/scene-music';
 import { activeMatch, attachSelectHotkey, createBootScene } from '@/game/scenes';
 
 /** The fight the game boots into. `[` opens the selector to change it. */
@@ -64,22 +66,26 @@ const boot = async (): Promise<void> => {
   // here is optional: no Web Audio, or no file on disk, means silence and one
   // console warning — never a failed boot.
   const graph = createAudioGraph();
+  let sceneMusic: SceneMusic | undefined;
   if (graph !== null) {
     graph.resumeOnGesture(window);
     const loader = createAudioLoader(graph.buses.ctx);
     const music = createMusicPlayer(graph, loader);
-    const stageDef = REGISTRY.stages[BOOT_MATCH.stage]!;
-    graph.whenRunning(() => {
-      void music.play(stageDef);
-    });
-    (window as unknown as Record<string, unknown>).sunforceAudio = { graph, loader, music };
+    // main.ts no longer chooses a track. The scenes do: the fight asks for its
+    // stage's theme, the select screen asks for 'select', and the facade
+    // cross-fades between them. Starting the stage track here as well would
+    // play two at once on the boot fight.
+    sceneMusic = createSceneMusic(graph, music);
+    (window as unknown as Record<string, unknown>).sunforceAudio = {
+      graph, loader, music, sceneMusic,
+    };
   }
 
   // Skins are NOT awaited here. `match.prime()` installs the procedural stick
   // skin synchronously and swaps in each sprite sheet as it resolves, so a slow
   // or missing sheet delays nothing and never blocks the first frame.
   startLoopWith(
-    createBootScene({ gl: host.gl, renderer, registry: REGISTRY }, BOOT_MATCH),
+    createBootScene({ gl: host.gl, renderer, registry: REGISTRY, music: sceneMusic }, BOOT_MATCH),
     sources,
   );
 

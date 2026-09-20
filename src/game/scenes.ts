@@ -178,6 +178,10 @@ class FightScene implements Scene {
     this.match = m;
     live = m;
 
+    // The stage theme comes up UNDER the 750 ms fade, so the music is already
+    // running by the time the first numeral lands.
+    this.deps.music?.stageTheme(this.deps.registry.stages[m.cfg.stage]!);
+
     this.overlay = overlayHostOf(this.deps.renderer);
     this.introFrame = 0;
     this.introEnd = this.overlay === null ? 0 : INTRO_TOTAL_FRAMES;
@@ -247,6 +251,7 @@ class SelectScene implements Scene {
 
   enter(): void {
     consumeSelectRequest();
+    this.deps.music?.selectTheme();
     this.screen = createSelect(this.deps.registry, this.cfg);
     this.batch = new QuadBatch(this.deps.gl);
     this.primed = false;
