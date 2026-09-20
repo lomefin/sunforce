@@ -509,5 +509,60 @@ import { animOfState } from '../src/gfx/renderer';
   check('intro: every troupe track has a sane timeline', sane, true);
 }
 
+// =============================================================================
+// VIRTUD'S JUMP — the one set of physics that differs from the baseline
+// -----------------------------------------------------------------------------
+// A harder launch and lighter gravity: higher, and hanging longer. Horizontal
+// speed is the roster's, so the extra distance is bought purely with air time.
+// Measured through the real sim, because a jump is an integration and not an
+// equation — the fixed-point step is what decides the apex.
+{
+  const flight = (id: CharId, dir: number) => {
+    const s = createState(99, id, CharId.A, StageId.STAGE_1, REGISTRY);
+    const startX = px(s.fighter(0).posX);
+    const hold = dir === 0 ? B.U : dir > 0 ? B.U | B.R : B.U | B.L;
+    let apex = 0;
+    let air = 0;
+    let launched = false;
+    for (let i = 0; i < 200; i++) {
+      step(s, i < 6 ? hold : 0, 0);
+      const y = px(s.fighter(0).posY);
+      if (y > 0) { launched = true; air++; if (y > apex) apex = y; }
+      else if (launched) break;
+    }
+    return { apex, air, travel: Math.abs(px(s.fighter(0).posX) - startX) };
+  };
+
+  const base = flight(CharId.A, 0);
+  const wings = flight(CharId.F, 0);
+  const baseFwd = flight(CharId.A, 1);
+  const wingsFwd = flight(CharId.F, 1);
+
+  check('jump: Virtud goes higher than the baseline', wings.apex > base.apex, true);
+  check('jump: ...by about half again', Math.round((wings.apex / base.apex) * 100), 148);
+  check('jump: Virtud hangs longer', wings.air > base.air, true);
+  check('jump: ...58 frames against 45', `${wings.air}/${base.air}`, '58/45');
+  check('jump: a forward jump therefore travels further',
+    wingsFwd.travel > baseFwd.travel, true);
+  // DefRegistry.chars is indexed by CharId; `charOf` is the in-sim lookup and
+  // takes (state, player), which is not what is wanted here.
+  const defF = REGISTRY.chars[CharId.F]!;
+  const defA = REGISTRY.chars[CharId.A]!;
+  check('jump: the horizontal speed itself is unchanged', defF.jumpVelXF, defA.jumpVelXF);
+  // No flight, no glide, no second jump — one jump, just a bigger one.
+  check('jump: Virtud still has no air jump', defF.airJumps, 0);
+
+  // A higher jump that clips the ceiling is not a higher jump. Her whole
+  // 378-unit body has to fit under it at the apex.
+  const ceiling = REGISTRY.stages[StageId.STAGE_1]!.ceiling;
+  check('jump: the apex clears the stage ceiling', wings.apex + 378 < ceiling, true);
+
+  // The other five are deliberately identical: differentiate by play, and only
+  // where there is a reason. Virtud's reason is that she is drawn with wings.
+  const grounded = [CharId.B, CharId.C, CharId.D, CharId.E]
+    .every((id) => flight(id, 0).apex === base.apex);
+  check('jump: nobody else was quietly changed', grounded, true);
+}
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

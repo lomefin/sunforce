@@ -148,8 +148,21 @@ export const CHAR_F: CharDef = {
     dashSpeed: 9.0, dashFrames: 20,
     backDashSpeed: 8.0, backDashFrames: 22,
     runDash: true,
-    jumpSquat: 4, jumpVelY: 24.2, jumpVelXF: 5.0, jumpVelXB: 4.4,
-    gravity: 1.10, airDrag: 1.0, groundFriction: 0.84,
+    // THE LONGEST JUMP ON THE ROSTER, and the only physics that differ from
+    // the baseline. Virtud is DRAWN with wings — they are in the art already,
+    // nothing here adds them or makes her fly — so hers is the jump that ought
+    // to match the silhouette: a harder launch and lighter gravity, higher and
+    // hanging longer. 412 units against 278, 58 airborne frames against 45.
+    //
+    // The horizontal speeds are the roster's, untouched, so the extra distance
+    // is bought entirely with air time. That is what "higher, and therefore
+    // longer" means, and it is why this is not simply a buff: half again as
+    // long in the air is half again as long committed, unable to block, with
+    // the landing telegraphed. Measured against A in scripts/check-rules.ts.
+    //
+    // Still one jump, no air jump, no glide, no flight.
+    jumpSquat: 4, jumpVelY: 27.5, jumpVelXF: 5.0, jumpVelXB: 4.4,
+    gravity: 0.95, airDrag: 1.0, groundFriction: 0.84,
     airJumps: 0, weightPct: 100, landingLag: 3,
   },
   standPush: STAND_PUSH,

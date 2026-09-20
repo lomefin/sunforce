@@ -103,6 +103,13 @@ early hand-authored vector sheets. The three troupes in the game are **Caporal**
 Archetype intent, which the CPU strategies in `src/input/cpu.ts` express: A all-rounder,
 B heavyweight, C rushdown, D aerial, E trickster, F charge.
 
+**F is the one exception to identical physics.** Virtud is drawn with wings, so her
+jump matches the silhouette: 412 units against the roster's 278, 58 airborne frames
+against 45. Horizontal speed is unchanged — the extra distance is all air time. She
+still has one jump and no flight; only `jumpVelY` and `gravity` differ. Note that D
+remains the *aerial archetype* (the one whose CPU jumps constantly); F simply owns the
+biggest leap.
+
 ## The one architectural rule that matters
 
 The character renderer is **part/bone based**. Stick figures and the real vector costume art
