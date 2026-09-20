@@ -143,6 +143,13 @@ export const CHAR_D: CharDef = {
   dance: 'Tinku',
   hp: 1000,
   conceptSpace: CS,
+  /** Tinku Supay — her brother's build with the soft strike moved to the
+   *  punch, so the two Tinkus play alike and finish differently. */
+  traits: {
+    movement: 110, jump: 95,
+    punch: 90, kick: 95,
+    weight: 90, stamina: 105,
+  },
   physics: {
     walkF: 4.0, walkB: 3.4,
     dashSpeed: 9.0, dashFrames: 20,

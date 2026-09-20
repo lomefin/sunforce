@@ -143,6 +143,14 @@ export const CHAR_E: CharDef = {
   dance: 'Diablada',
   hp: 1000,
   conceptSpace: CS,
+  /** Diablo — the heavyweight. Slow, ponderous and slow to recover, and it
+   *  buys the hardest hits on the roster and a body that barely moves when
+   *  struck. Trading with him is a losing trade. */
+  traits: {
+    movement: 90, jump: 90,
+    punch: 110, kick: 110,
+    weight: 120, stamina: 90,
+  },
   physics: {
     walkF: 4.0, walkB: 3.4,
     dashSpeed: 9.0, dashFrames: 20,

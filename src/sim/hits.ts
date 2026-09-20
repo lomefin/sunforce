@@ -36,11 +36,11 @@
 // =============================================================================
 
 import {
-  B, Contact, Ev, FF, Gd, JUGGLE_GRAVITY_MAX_PCT, JUGGLE_GRAVITY_STEP_PCT, MoveId,
-  RoundState, Rx, S, SfxId, SparkId,
+  B, CLASH_PUSH, Contact, Ev, FF, Gd, JUGGLE_GRAVITY_MAX_PCT, JUGGLE_GRAVITY_STEP_PCT,
+  MoveId, RoundState, Rx, S, SfxId, SparkId,
 } from '@/core/contracts';
 import type { FX, GuardMask, PlayerIx, SimState } from '@/core/contracts';
-import { fxPct } from '@/core/fixed';
+import { fx, fxPct } from '@/core/fixed';
 import { ringHeld } from '@/core/ring';
 import { charOf, otherPlayer } from '@/sim/state';
 import { hitIdBit, isAirborne, isCrouching, moveOf } from '@/sim/collision';
@@ -446,6 +446,69 @@ const applyOne = (s: SimState, snap: PreCommit, o: Outcome): void => {
   }
 };
 
+/** Converted once: the tunable is authored in world units like every kbX. */
+const CLASH_PUSH_FX = fx(CLASH_PUSH);
+
+/**
+ * BOTH STRIKES LANDED THIS FRAME. Not a trade where each fighter eats the
+ * other's damage — a CLASH, where neither does.
+ *
+ * A blocked strike is excluded deliberately: guarding is a decision the
+ * defender made and it already has its own outcome. A clash is two people
+ * swinging into each other with nothing in between.
+ */
+const isClash = (a: Outcome, b: Outcome): boolean =>
+  a.connected && !a.denied && !a.blocked
+  && b.connected && !b.denied && !b.blocked;
+
+/**
+ * No damage, no stun, no combo — both fighters shoved apart and frozen for the
+ * longer of the two hitstops, so the collision reads as an impact rather than
+ * as two attacks that quietly whiffed.
+ *
+ * DIRECTION is each fighter's OWN facing, reversed. That is the same rule the
+ * knockback uses and for the same reason: comparing the two positions is a
+ * slot-order tiebreak in disguise and breaks at exactly equal x.
+ *
+ * The magnitude is truncated by `fxPct` BEFORE the sign is applied, which is
+ * what keeps a clash pushing the same distance left as right.
+ */
+const applyClash = (s: SimState, snap: PreCommit, o0: Outcome, o1: Outcome): void => {
+  const stop = o0.hitstop > o1.hitstop ? o0.hitstop : o1.hitstop;
+  for (let p = 0 as PlayerIx; p <= 1; p = (p + 1) as PlayerIx) {
+    const sn = snap.f[p]!;
+    const f = s.fighter(p);
+
+    // A CLASH INTERRUPTS BOTH ATTACKS, exactly as being hit interrupts a
+    // defender above, and for a concrete reason rather than a stylistic one: a
+    // move reassigns velX from its frame data every frame it runs, so a push
+    // applied while the move is still live is silently overwritten the instant
+    // hitstop ends — the fighters freeze, unfreeze, and slide nowhere.
+    //
+    // No damage and NO STUN, so both are free the moment hitstop expires.
+    // Neither of them won; neither should be punished for it.
+    f.stateFrame = 0;
+    if (sn.action !== MoveId.NONE) f.prevAction = sn.action;
+    f.action = MoveId.NONE;
+    f.actionFrame = 0;
+    f.lastContact = Contact.NONE;
+    f.flags = sn.flags & ~(FF.HIT_CONFIRMED | FF.BLOCK_CONFIRMED | FF.COUNTER_STATE);
+    f.state = sn.airborne ? S.JUMP_FALL : S.STAND;
+
+    const away = sn.facing >= 0 ? -1 : 1;
+    // Weight is mass: the same shove moves the lighter fighter further.
+    f.velX = fxPct(CLASH_PUSH_FX, sn.weightPct) * away;
+    if (f.hitstop < stop) f.hitstop = stop;
+    // Consume the hitId anyway, or the same pair of boxes clashes again next
+    // frame and the two of them judder apart instead of separating once.
+    f.hitIdsUsed = sn.hitIdsUsed | (p === 0 ? o0.idBit : o1.idBit);
+  }
+  pushEvent(
+    s, Ev.CLASH, 0, packB(0, SfxId.NONE),
+    o0.contactX, o0.contactY, packExtra(SparkId.NONE, 0, 0, 0),
+  );
+};
+
 /**
  * PHASE 10. Decides both strikes against the frozen snapshot, then applies
  * them. Nothing read here comes from a live fighter view.
@@ -455,6 +518,14 @@ export const commit = (s: SimState, g: GatherResult, snap: PreCommit): void => {
   const o1 = OUT[1];
   decide(snap, g.hit[0], o0);
   decide(snap, g.hit[1], o1);
+
+  // Decided together, so neither has been applied yet and cancelling both is
+  // still possible. This is the whole reason decide() and applyOne() are
+  // separate passes.
+  if (isClash(o0, o1)) {
+    applyClash(s, snap, o0, o1);
+    return;
+  }
 
   applyOne(s, snap, o0);
   applyOne(s, snap, o1);

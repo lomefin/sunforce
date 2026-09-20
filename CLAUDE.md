@@ -48,8 +48,15 @@ player's attacks sit under the hand already resting on their movement keys.
 
 - 6 characters: `A B C D E F`
 - Every character has **1000 HP**
-- A connected **punch = 50** damage
-- A connected **kick = 100** damage
+- A connected **punch = 50** damage — the BASE, before the attacker's rating
+- A connected **kick = 100** damage — likewise
+
+Damage is authored 50 / 100 and stays that way: `HitProps.damage` is still the
+literal union `50 | 100` and the helpers in `chars/common.ts` still re-pin it
+after any override. A character's `punch` / `kick` rating is a **bonus on top of
+that base**, folded in once by `data/compile.ts` — Tinku Supay's 90 punch is
+`50 * 0.90 = 45`. A 100-rated fighter deals exactly 50 and 100, which is what
+`npm run check` measures the rule with.
 - Flow: pick 2 characters → load a stage → fight. **No story mode.**
 - Characters are **stick figures for now** — placeholders, deliberately
 
@@ -102,6 +109,44 @@ early hand-authored vector sheets. The three troupes in the game are **Caporal**
 
 Archetype intent, which the CPU strategies in `src/input/cpu.ts` express: A all-rounder,
 B heavyweight, C rushdown, D aerial, E trickster, F charge.
+
+## Traits — one rating per axis, 100 = baseline, 80..120 = the band
+
+`CharDef.traits` carries six ratings and `data/compile.ts` folds them into the
+compiled numbers **once, at build time**. The sim never sees a trait, and a
+roster rated all-100 compiles to exactly the authored numbers.
+
+| | movement | jump | punch | kick | weight | stamina |
+|---|---|---|---|---|---|---|
+| A Caporal | 100 | 100 | **110** | 100 | 100 | **105** |
+| B Machona | 100 | 100 | 100 | **110** | 100 | **105** |
+| C Macho Tinku | **110** | **95** | **95** | **90** | **90** | **105** |
+| D Tinku Supay | **110** | **95** | **90** | **95** | **90** | **105** |
+| E Diablo | **90** | **90** | **110** | **110** | **120** | **90** |
+| F Virtud | 100 | **114** | 100 | 100 | 100 | 100 |
+
+- **movement** scales walk, dash and the horizontal speed carried into a jump.
+- **jump** scales LAUNCH VELOCITY, so apex goes with its square and air time
+  linearly. Floatiness is `PhysicsDef.gravity`, authored per character and
+  deliberately separate — Virtud is the only one who uses both knobs.
+- **weight** is mass: knockback received scales as `100/weight`, so 120 slides
+  0.83x and 90 slides 1.11x. It is also what a clash divides by.
+- **stamina** shortens the attack RECOVERY TAIL only, never startup and never
+  the active window.
+
+Ratings are percentages on plain integers, so they **round** rather than
+truncate — `50 * 95%` is 48, not 47. The `|0` rule exists to keep mirrored
+POSITIONS symmetric and no rating is a position.
+
+## The clash
+
+Two strikes landing on the **same frame** cancel: neither fighter takes damage
+or stun, both are interrupted out of their attack, and both are shoved apart by
+`CLASH_PUSH` scaled by their own weight — so the lighter one goes further. A
+blocked strike is not a clash; guarding is a decision with its own outcome.
+
+Direction is each fighter's own facing, reversed. Comparing the two positions
+would be a slot-order tiebreak in disguise and would break at exactly equal x.
 
 **F is the one exception to identical physics.** Virtud is drawn with wings, so her
 jump matches the silhouette: 412 units against the roster's 278, 58 airborne frames

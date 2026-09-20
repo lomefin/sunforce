@@ -1,6 +1,6 @@
 // Headless acceptance test for the M0 game rules.
 // The sim is pure over (state, inputs), so it runs fine with no browser at all.
-import { B, CharId, S, StageId } from '../src/core/contracts';
+import { B, CharId, MoveId, S, StageId } from '../src/core/contracts';
 import { fx, px } from '../src/core/fixed';
 import { charOf, createState } from '../src/sim/state';
 import { hurtBoxesOf } from '../src/sim/collision';
@@ -24,8 +24,19 @@ const check = (label: string, got: unknown, want: unknown): void => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}: got ${String(got)}, want ${String(want)}`);
 };
 
-const fresh = () => {
-  const s = createState(1234, CharId.A, CharId.A, StageId.STAGE_1, REGISTRY);
+/**
+ * THE BASELINE FIGHTER. Traits are percentages of the authored numbers, so a
+ * test of "the rule" has to be run by somebody rated 100 in the thing it is
+ * testing — otherwise it measures that character's bonus instead. Virtud is
+ * 100 punch, 100 kick, 100 weight, 100 stamina; her jump rating is the only one
+ * that differs and no damage test touches it.
+ *
+ * Character A is NOT baseline any more: Caporal punches at 110.
+ */
+const BASELINE = CharId.F;
+
+const fresh = (p0: CharId = CharId.A, p1: CharId = CharId.A) => {
+  const s = createState(1234, p0, p1, StageId.STAGE_1, REGISTRY);
   // Stand them close enough that a 92-unit punch reaches.
   s.fighter(0).posX = fx(1780);
   s.fighter(1).posX = fx(1820);
@@ -34,8 +45,10 @@ const fresh = () => {
   return s;
 };
 
-const runMove = (button: number): { hp: number; maxStop: number; frames: number } => {
-  const s = fresh();
+const runMove = (
+  button: number, atk: CharId = CharId.A, def: CharId = CharId.A,
+): { hp: number; maxStop: number; frames: number } => {
+  const s = fresh(atk, def);
   let maxStop = 0;
   let hitFrame = -1;
   for (let i = 0; i < 40; i++) {
@@ -53,11 +66,13 @@ const s0 = fresh();
 check('starting HP p0', s0.fighter(0).hp, 1000);
 check('starting HP p1', s0.fighter(1).hp, 1000);
 
-const punch = runMove(B.P);
+// THE RULE, measured by a baseline fighter: a punch is 50 and a kick is 100
+// before any rating touches them.
+const punch = runMove(B.P, BASELINE, BASELINE);
 check('punch leaves HP', punch.hp, 950);
 check('punch hitstop', punch.maxStop, 9);
 
-const kick = runMove(B.K);
+const kick = runMove(B.K, BASELINE, BASELINE);
 check('kick leaves HP', kick.hp, 900);
 check('kick hitstop', kick.maxStop, 14);
 
@@ -65,7 +80,7 @@ check('kick hitstop', kick.maxStop, 14);
 // and the combo counter expire naturally between them, or proration (correctly)
 // scales the later hits down and this never reaches zero.
 {
-  const s = fresh();
+  const s = fresh(BASELINE, BASELINE);
   let kos = 0;
   for (let rep = 0; rep < 12; rep++) {
     s.fighter(0).posX = fx(1780);
@@ -537,12 +552,16 @@ import { animOfState } from '../src/gfx/renderer';
 }
 
 // =============================================================================
-// VIRTUD'S JUMP — the one set of physics that differs from the baseline
+// THE JUMP TABLE — one rating, six arcs
 // -----------------------------------------------------------------------------
-// A harder launch and lighter gravity: higher, and hanging longer. Horizontal
-// speed is the roster's, so the extra distance is bought purely with air time.
-// Measured through the real sim, because a jump is an integration and not an
-// equation — the fixed-point step is what decides the apex.
+// `jump` scales LAUNCH VELOCITY, so apex goes with its square and air time
+// linearly: one number moves both "how high" and "how long". `movement` scales
+// the horizontal speed carried into the air, which is why the Tinkus cover MORE
+// ground than the baseline while jumping LOWER than it — the exact interaction
+// a single "jump distance" number could not express.
+//
+// Measured through the real sim, because a jump is an integration and the
+// fixed-point step is what decides the apex.
 {
   const flight = (id: CharId, dir: number) => {
     const s = createState(99, id, CharId.A, StageId.STAGE_1, REGISTRY);
@@ -551,44 +570,48 @@ import { animOfState } from '../src/gfx/renderer';
     let apex = 0;
     let air = 0;
     let launched = false;
-    for (let i = 0; i < 200; i++) {
+    for (let i = 0; i < 260; i++) {
       step(s, i < 6 ? hold : 0, 0);
       const y = px(s.fighter(0).posY);
       if (y > 0) { launched = true; air++; if (y > apex) apex = y; }
       else if (launched) break;
     }
-    return { apex, air, travel: Math.abs(px(s.fighter(0).posX) - startX) };
+    return { apex: Math.round(apex), air, travel: Math.round(Math.abs(px(s.fighter(0).posX) - startX)) };
   };
 
-  const base = flight(CharId.A, 0);
-  const wings = flight(CharId.F, 0);
-  const baseFwd = flight(CharId.A, 1);
-  const wingsFwd = flight(CharId.F, 1);
+  const up = [CharId.A, CharId.B, CharId.C, CharId.D, CharId.E, CharId.F].map((id) => flight(id, 0));
+  const fwd = [CharId.A, CharId.B, CharId.C, CharId.D, CharId.E, CharId.F].map((id) => flight(id, 1));
+  const [a, b, c, d, e, f] = up as [typeof up[0], typeof up[0], typeof up[0], typeof up[0], typeof up[0], typeof up[0]];
 
-  check('jump: Virtud goes higher than the baseline', wings.apex > base.apex, true);
-  check('jump: ...by about half again', Math.round((wings.apex / base.apex) * 100), 148);
-  check('jump: Virtud hangs longer', wings.air > base.air, true);
-  check('jump: ...58 frames against 45', `${wings.air}/${base.air}`, '58/45');
-  check('jump: a forward jump therefore travels further',
-    wingsFwd.travel > baseFwd.travel, true);
-  // DefRegistry.chars is indexed by CharId; `charOf` is the in-sim lookup and
-  // takes (state, player), which is not what is wanted here.
-  const defF = REGISTRY.chars[CharId.F]!;
-  const defA = REGISTRY.chars[CharId.A]!;
-  check('jump: the horizontal speed itself is unchanged', defF.jumpVelXF, defA.jumpVelXF);
-  // No flight, no glide, no second jump — one jump, just a bigger one.
-  check('jump: Virtud still has no air jump', defF.airJumps, 0);
+  // The two Caporales are the baseline the rest is measured against.
+  check('jump: A and B are the baseline arc', `${a.apex}/${a.air}`, '279/45');
+  check('jump: the two Caporales are identical', `${b.apex}/${b.air}`, `${a.apex}/${a.air}`);
 
-  // A higher jump that clips the ceiling is not a higher jump. Her whole
+  // Rated 95: lower and shorter, and the two Tinkus match each other.
+  check('jump: the Tinkus jump lower than baseline', `${c.apex}/${c.air}`, '252/42');
+  check('jump: the two Tinkus are identical', `${d.apex}/${d.air}`, `${c.apex}/${c.air}`);
+
+  // Rated 90 on both jump AND movement: the shortest hop on the roster.
+  check('jump: Diablo has the lowest jump', `${e.apex}/${e.air}`, '227/40');
+  check('jump: Virtud has the highest', `${f.apex}/${f.air}`, '415/59');
+
+  check('jump: the order is Virtud > Caporal > Tinku > Diablo',
+    f.apex > a.apex && a.apex > c.apex && c.apex > e.apex, true);
+
+  // THE INTERACTION worth pinning: a Tinku jumps LOWER than a Caporal and still
+  // travels FURTHER, because movement 110 scales the speed carried into the air.
+  check('jump: a Tinku covers more ground despite the lower arc',
+    fwd[2]!.travel > fwd[0]!.travel && c.apex < a.apex, true);
+  check('jump: Diablo covers the least ground',
+    fwd[4]!.travel < Math.min(...fwd.map((v) => v.travel).filter((v) => v !== fwd[4]!.travel)), true);
+
+  // No flight, no glide, no second jump — Virtud has one jump, just a bigger one.
+  check('jump: Virtud still has no air jump', REGISTRY.chars[CharId.F]!.airJumps, 0);
+
+  // A higher jump that clips the ceiling is not a higher jump: her whole
   // 378-unit body has to fit under it at the apex.
   const ceiling = REGISTRY.stages[StageId.STAGE_1]!.ceiling;
-  check('jump: the apex clears the stage ceiling', wings.apex + 378 < ceiling, true);
-
-  // The other five are deliberately identical: differentiate by play, and only
-  // where there is a reason. Virtud's reason is that she is drawn with wings.
-  const grounded = [CharId.B, CharId.C, CharId.D, CharId.E]
-    .every((id) => flight(id, 0).apex === base.apex);
-  check('jump: nobody else was quietly changed', grounded, true);
+  check('jump: the highest apex still clears the ceiling', f.apex + 378 < ceiling, true);
 }
 
 // =============================================================================
@@ -625,6 +648,120 @@ import { animOfState } from '../src/gfx/renderer';
     check('idle: the costumes with numbered neutrals actually animate',
       looping >= 2, true);
   }
+}
+
+// =============================================================================
+// TRAITS — ratings as percentages of the authored numbers
+// -----------------------------------------------------------------------------
+// The rule is unchanged: a punch is authored 50 and a kick 100. A rating is a
+// bonus ON TOP of that base, folded in once at compile time, so Tinku Supay's
+// 90 punch is 50 * 0.90 = 45 and the sim never sees a trait at all.
+{
+  const duel = (atk: CharId, def: CharId, btn: number) => {
+    const s = createState(1234, atk, def, StageId.STAGE_1, REGISTRY);
+    s.fighter(0).posX = fx(1780);
+    s.fighter(1).posX = fx(1820);
+    s.fighter(0).facing = 1;
+    s.fighter(1).facing = -1;
+    const x0 = px(s.fighter(1).posX);
+    let slide = 0;
+    for (let i = 0; i < 60; i++) {
+      step(s, i === 0 ? btn : 0, 0);
+      const d = Math.abs(px(s.fighter(1).posX) - x0);
+      if (d > slide) slide = d;
+    }
+    return { dmg: 1000 - s.fighter(1).hp, slide: Math.round(slide) };
+  };
+
+  // The user's own worked example.
+  check('traits: Tinku Supay punches for 50 * 0.90', duel(CharId.D, BASELINE, B.P).dmg, 45);
+  check('traits: Caporal punches for 50 * 1.10', duel(CharId.A, BASELINE, B.P).dmg, 55);
+  check('traits: a baseline punch is still exactly 50', duel(BASELINE, BASELINE, B.P).dmg, 50);
+  check('traits: a baseline kick is still exactly 100', duel(BASELINE, BASELINE, B.K).dmg, 100);
+  check('traits: Diablo kicks for 100 * 1.10', duel(CharId.E, BASELINE, B.K).dmg, 110);
+  check('traits: Macho Tinku kicks for 100 * 0.90', duel(CharId.C, BASELINE, B.K).dmg, 90);
+
+  // THE SCENARIO, stated as the asymmetry it is meant to produce: the Diablo
+  // takes more off a Tinku than the Tinku takes back, and shoves it further.
+  const diabloHits = duel(CharId.E, CharId.C, B.K);
+  const tinkuHits = duel(CharId.C, CharId.E, B.K);
+  check('traits: Diablo draws more HP from a Tinku than it draws back',
+    diabloHits.dmg > tinkuHits.dmg, true);
+  check('traits: ...and the Tinku slides further than the Diablo does',
+    diabloHits.slide > tinkuHits.slide, true);
+
+  // Weight is mass: knockback RECEIVED goes as 100/weight.
+  check('traits: Diablo is the hardest to move', REGISTRY.chars[CharId.E]!.weightPct, 83);
+  check('traits: a Tinku is the easiest', REGISTRY.chars[CharId.C]!.weightPct, 111);
+  check('traits: a baseline fighter is unscaled', REGISTRY.chars[BASELINE]!.weightPct, 100);
+
+  // Movement scales walk speed; the Tinkus are the quick ones.
+  check('traits: Tinkus walk faster than baseline',
+    REGISTRY.chars[CharId.C]!.walkF > REGISTRY.chars[BASELINE]!.walkF, true);
+  check('traits: Diablo walks slower',
+    REGISTRY.chars[CharId.E]!.walkF < REGISTRY.chars[BASELINE]!.walkF, true);
+
+  // Stamina shortens the RECOVERY TAIL only — never startup, never the active
+  // window. A 105 recovers sooner than a 90 on the identical authored move.
+  const total = (id: CharId, mv: MoveId): number => REGISTRY.chars[id]!.moves[mv]!.totalFrames;
+  const startup = (id: CharId, mv: MoveId): number => REGISTRY.chars[id]!.moves[mv]!.startup;
+  check('traits: 105 stamina recovers sooner than 90',
+    total(CharId.A, MoveId.A_5K) < total(CharId.E, MoveId.E_5K), true);
+  check('traits: stamina never touches startup',
+    startup(CharId.A, MoveId.A_5K), startup(CharId.E, MoveId.E_5K));
+}
+
+// =============================================================================
+// THE CLASH — two strikes on the same frame
+// -----------------------------------------------------------------------------
+// Neither fighter takes damage; both are shoved apart, and the lighter one goes
+// further because the shove is divided by mass exactly as knockback is.
+{
+  const clash = (p0: CharId, p1: CharId) => {
+    const s = createState(1234, p0, p1, StageId.STAGE_1, REGISTRY);
+    s.fighter(0).posX = fx(1780);
+    s.fighter(1).posX = fx(1820);
+    s.fighter(0).facing = 1;
+    s.fighter(1).facing = -1;
+    for (let i = 0; i < 10; i++) step(s, i === 0 ? B.K : 0, i === 0 ? B.K : 0);
+    const v0 = s.fighter(0).velX;
+    const v1 = s.fighter(1).velX;
+    const a = px(s.fighter(0).posX);
+    const b = px(s.fighter(1).posX);
+    for (let i = 0; i < 80; i++) step(s, 0, 0);
+    return {
+      hp0: s.fighter(0).hp, hp1: s.fighter(1).hp, v0, v1,
+      d0: Math.round(Math.abs(px(s.fighter(0).posX) - a)),
+      d1: Math.round(Math.abs(px(s.fighter(1).posX) - b)),
+    };
+  };
+
+  const even = clash(BASELINE, BASELINE);
+  check('clash: neither fighter takes damage', `${even.hp0}/${even.hp1}`, '1000/1000');
+  check('clash: both are shoved', even.d0 > 0 && even.d1 > 0, true);
+  // Mirror symmetry: equal weights must travel EXACTLY the same distance, or
+  // the clash has a left/right bias and P1 and P2 are not playing one game.
+  check('clash: equal weights go exactly the same distance', even.d0, even.d1);
+  check('clash: ...in opposite directions', Math.sign(even.v0) !== Math.sign(even.v1), true);
+
+  const uneven = clash(CharId.E, CharId.C);
+  check('clash: no damage across a weight mismatch either',
+    `${uneven.hp0}/${uneven.hp1}`, '1000/1000');
+  check('clash: the lighter fighter is shoved further', uneven.d1 > uneven.d0, true);
+  // 4.0 units scaled by each side's own weightPct: 83% and 111%.
+  check('clash: the shove is divided by mass', `${Math.abs(uneven.v0)}/${Math.abs(uneven.v1)}`, '849/1136');
+
+  // A clash leaves nobody in stun: neither of them won, so neither is punished.
+  const s2 = createState(1234, CharId.E, CharId.C, StageId.STAGE_1, REGISTRY);
+  s2.fighter(0).posX = fx(1780);
+  s2.fighter(1).posX = fx(1820);
+  s2.fighter(0).facing = 1;
+  s2.fighter(1).facing = -1;
+  for (let i = 0; i < 10; i++) step(s2, i === 0 ? B.K : 0, i === 0 ? B.K : 0);
+  check('clash: neither fighter is left in hitstun',
+    s2.fighter(0).hitstun + s2.fighter(1).hitstun, 0);
+  check('clash: both are interrupted out of their attack',
+    s2.fighter(0).action + s2.fighter(1).action, MoveId.NONE + MoveId.NONE);
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

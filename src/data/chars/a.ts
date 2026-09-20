@@ -147,6 +147,14 @@ export const CHAR_A: CharDef = {
   dance: 'Caporal',
   hp: 1000,
   conceptSpace: CS,
+  /** Caporal — the all-rounder. One point of bite in the jab and a little
+   *  stamina to use it with; everything else is the number every other
+   *  character is measured against. */
+  traits: {
+    movement: 100, jump: 100,
+    punch: 110, kick: 100,
+    weight: 100, stamina: 105,
+  },
   physics: {
     walkF: 4.0, walkB: 3.4,
     dashSpeed: 9.0, dashFrames: 20,

@@ -55,11 +55,13 @@
 // an inherited sound retriggers 29 times.
 // =============================================================================
 
-import { BONE_COUNT, MoveId, ONE, SfxId, VEL_KEEP } from '@/core/contracts';
+import {
+  BONE_COUNT, G, MoveId, NEUTRAL_TRAITS, ONE, SfxId, TRAIT_BASE, TRAIT_MAX, TRAIT_MIN, VEL_KEEP,
+} from '@/core/contracts';
 import type {
   CharDef, CompileFn, CompiledChar, CompiledFrame, CompiledHit, CompiledHitProps,
   CompiledMove, CompiledThrow, CompiledThrowProps, ConceptBox, ConceptSpace,
-  FX, FxBox, HitProps, MoveDef, StageDef, ThrowProps,
+  FX, FxBox, GroupMask, HitProps, MoveDef, StageDef, ThrowProps, TraitsDef,
 } from '@/core/contracts';
 import { assert } from '@/core/assert';
 import { fx } from '@/core/fixed';
@@ -124,11 +126,47 @@ export const conceptBox = (b: ConceptBox, cs: ConceptSpace, where: string): FxBo
 };
 
 // -----------------------------------------------------------------------------
+// TRAITS -> NUMBERS
+//
+// Every rating is a PERCENTAGE OF THE AUTHORED VALUE, folded in exactly once,
+// here, at build time. The sim never sees a trait: it reads the same compiled
+// fields it always did, so a roster of all-100 characters compiles to precisely
+// the numbers that were authored and nothing downstream can tell the difference.
+//
+// ROUNDING. These are balance scalars on plain integers — damage, frame counts,
+// percentages — not fixed-point coordinates, so they ROUND rather than truncate:
+// 50 * 95% is 47.5 and 48 is the honest answer, where the `|0` truncation the
+// rest of the engine insists on would quietly shave a point off. That rule
+// exists to keep mirrored POSITIONS symmetric, and no number here is a position.
+// -----------------------------------------------------------------------------
+
+/** `v` scaled by a percentage rating, rounded, never below 1. */
+const byTrait = (v: number, pct: number): number => Math.max(1, Math.round((v * pct) / 100));
+
+/** Same, but free to reach 0 — for frame counts that may legitimately vanish. */
+const byTrait0 = (v: number, pct: number): number => Math.max(0, Math.round((v * pct) / 100));
+
+/**
+ * INVERSE ratings: the ones where a bigger number means LESS of the thing.
+ * Weight is mass, so knockback received goes as 100/weight — 120 slides 0.83x
+ * as far, 90 slides 1.11x. Stamina is recovery speed, so recovery frames go the
+ * same way. Both are the reciprocal because both describe RESISTANCE.
+ */
+const inverse = (pct: number): number => Math.max(1, Math.round((100 * 100) / pct));
+
+/** Which power rating a move's damage answers to. A move declares its own
+ *  group, so this never has to guess from a name or a MoveId. */
+const powerOf = (group: GroupMask, t: TraitsDef): number =>
+  (group & G.KICK) !== 0 ? t.kick : (group & G.PUNCH) !== 0 ? t.punch : TRAIT_BASE;
+
+// -----------------------------------------------------------------------------
 // Hit / throw properties
 // -----------------------------------------------------------------------------
 
-const compileHitProps = (p: HitProps, where: string): CompiledHitProps => ({
-  damage: p.damage,
+const compileHitProps = (p: HitProps, where: string, powerPct: number): CompiledHitProps => ({
+  // THE GAME RULE, still: a punch is authored 50 and a kick 100. The rating is
+  // a bonus ON TOP of that base — Tinku Supay's 90 punch is 50 * 0.90 = 45.
+  damage: byTrait(p.damage, powerPct),
   guard: p.guard,
   hitstun: p.hitstun | 0,
   blockstun: p.blockstun | 0,
@@ -178,7 +216,28 @@ const compileThrowProps = (p: ThrowProps, where: string): CompiledThrowProps => 
  * the timeline sets one — a fighter with a zero-width pushbox falls through the
  * separation pass.
  */
-export const compileMove = (m: MoveDef, cs: ConceptSpace, fallbackPush: FxBox): CompiledMove => {
+export const compileMove = (
+  m: MoveDef, cs: ConceptSpace, fallbackPush: FxBox, traits: TraitsDef = NEUTRAL_TRAITS,
+): CompiledMove => {
+  const powerPct = powerOf(m.group, traits);
+
+  // STAMINA shortens the RECOVERY TAIL and nothing else. The frames before and
+  // during a hitbox are the move's identity — its startup is its risk and its
+  // active window is its reach — so stamina may not touch them; what it buys is
+  // getting back to neutral sooner, which is exactly "able to hit again".
+  //
+  // Implemented by trimming `totalFrames`, because compile expands the timeline
+  // into one entry per frame and the tail entries ARE the recovery. Cutting
+  // there cannot disturb a hitbox, and the sprite clip simply ends on its last
+  // pose a frame early — which is a neutral pose returning to a neutral idle.
+  const lastActive = m.timeline.reduce(
+    (n, k) => (k.hit !== undefined && k.hit.length > 0 ? Math.max(n, k.at) : n), -1,
+  );
+  const recoverFrom = lastActive < 0 ? m.totalFrames : lastActive + 1;
+  const recoverFrames = m.totalFrames - recoverFrom;
+  const totalFrames = recoverFrames <= 0
+    ? m.totalFrames
+    : recoverFrom + byTrait0(recoverFrames, inverse(traits.stamina));
   const where = `${m.name} [MoveId ${m.id}]`;
   assert(m.totalFrames > 0, `${where}: totalFrames must be positive, got ${m.totalFrames}`);
   assert(m.timeline.length > 0, `${where}: timeline is empty`);
@@ -213,7 +272,7 @@ export const compileMove = (m: MoveDef, cs: ConceptSpace, fallbackPush: FxBox): 
       if (kf.hit !== undefined) {
         hit = kf.hit.map((h, i) => ({
           box: conceptBox(h.box, cs, `${where} f${f} hit[${i}]`),
-          props: compileHitProps(h.props, `${where} f${f} hit[${i}]`),
+          props: compileHitProps(h.props, `${where} f${f} hit[${i}]`, powerPct),
         }));
       }
       if (kf.throwBox !== undefined) {
@@ -239,6 +298,13 @@ export const compileMove = (m: MoveDef, cs: ConceptSpace, fallbackPush: FxBox): 
     `${where}: keyframe at frame ${m.timeline[k]?.at} is past totalFrames ${m.totalFrames}`,
   );
 
+  // NOW trim. Every authored frame was expanded above, so the timeline is fully
+  // consumed and the assert above still means what it says; stamina only
+  // decides how many of the trailing recovery frames survive into the move the
+  // sim actually runs. `recoverFrom` is one past the last hitbox, so this can
+  // never reach startup or an active frame.
+  if (totalFrames < frames.length) frames.length = totalFrames;
+
   // --- derived frame data ----------------------------------------------------
   // "Active" is any frame carrying a hitbox OR a throwbox, so a throw reports a
   // real startup to the block predicate and the F3 overlay.
@@ -253,7 +319,7 @@ export const compileMove = (m: MoveDef, cs: ConceptSpace, fallbackPush: FxBox): 
 
   // A move with no active frames is never "past startup", so it stays blockable
   // out of and cancellable by the normal rules.
-  const startup = activeFirst < 0 ? m.totalFrames : activeFirst;
+  const startup = activeFirst < 0 ? totalFrames : activeFirst;
 
   // adv = stun - (totalFrames - 1 - firstActiveFrame). Hitstop is symmetric by
   // contract, so it cancels out of both sides and advantage is arithmetic.
@@ -262,7 +328,7 @@ export const compileMove = (m: MoveDef, cs: ConceptSpace, fallbackPush: FxBox): 
   if (activeFirst >= 0) {
     const firstProps = frames[activeFirst]!.hit[0]?.props;
     if (firstProps !== undefined) {
-      const tail = m.totalFrames - 1 - activeFirst;
+      const tail = totalFrames - 1 - activeFirst;
       advHit = firstProps.hitstun - tail;
       advBlock = firstProps.blockstun - tail;
     }
@@ -276,7 +342,7 @@ export const compileMove = (m: MoveDef, cs: ConceptSpace, fallbackPush: FxBox): 
     negEdge: m.input.negEdge === true,
     dir: m.input.dir ?? 0,
     stateMask: m.stateMask,
-    totalFrames: m.totalFrames,
+    totalFrames,
     frames,
     cancels: m.cancels,
     selfChain: m.selfChain,
@@ -317,12 +383,28 @@ export const compileChar = (def: CharDef): CompiledChar => {
 
   const standPush = conceptBox(def.standPush, cs, `${where}.standPush`);
   const ph = def.physics;
+  const t = def.traits;
+  for (const [k, v] of Object.entries(t)) {
+    assert(
+      Number.isFinite(v) && v >= TRAIT_MIN && v <= TRAIT_MAX,
+      `${where}: trait ${k} is ${String(v)}, outside the ${TRAIT_MIN}..${TRAIT_MAX} band`,
+    );
+  }
+
+  // MOVEMENT is horizontal — walk, dash, and the speed you carry into a jump.
+  // JUMP is vertical — launch velocity only. Apex therefore scales with the
+  // SQUARE of the rating and air time linearly, so one number moves both "how
+  // high" and "how far", which is how a jump actually behaves. Floatiness stays
+  // `gravity`, authored per character, because how high and how heavy are
+  // different feels: Virtud is the only one who uses both knobs.
+  const mv = (v: number): number => (v * t.movement) / 100;
+  const jp = (v: number): number => (v * t.jump) / 100;
 
   const moves = new Array<CompiledMove | null>(MoveId.MOVE_COUNT).fill(null);
   for (const m of def.moves) {
     assert(m.id > MoveId.NONE && m.id < MoveId.MOVE_COUNT, `${where}: move "${m.name}" has an out-of-range MoveId ${m.id}`);
     assert(moves[m.id] === null, `${where}: MoveId ${m.id} is declared twice`);
-    moves[m.id] = compileMove(m, cs, standPush);
+    moves[m.id] = compileMove(m, cs, standPush, def.traits);
   }
   // moveOrder is the PRIORITY table the transition ladder walks, and a typo in
   // it would silently make a move unreachable rather than fail.
@@ -336,22 +418,23 @@ export const compileChar = (def: CharDef): CompiledChar => {
     hp: def.hp,
     conceptSpace: cs,
 
-    walkF: toFx(ph.walkF, `${where}.walkF`),
-    walkB: toFx(ph.walkB, `${where}.walkB`),
-    dashSpeed: toFx(ph.dashSpeed, `${where}.dashSpeed`),
+    walkF: toFx(mv(ph.walkF), `${where}.walkF`),
+    walkB: toFx(mv(ph.walkB), `${where}.walkB`),
+    dashSpeed: toFx(mv(ph.dashSpeed), `${where}.dashSpeed`),
     dashFrames: ph.dashFrames | 0,
-    backDashSpeed: toFx(ph.backDashSpeed, `${where}.backDashSpeed`),
+    backDashSpeed: toFx(mv(ph.backDashSpeed), `${where}.backDashSpeed`),
     backDashFrames: ph.backDashFrames | 0,
     runDash: ph.runDash,
     jumpSquat: ph.jumpSquat | 0,
-    jumpVelY: toFx(ph.jumpVelY, `${where}.jumpVelY`),
-    jumpVelXF: toFx(ph.jumpVelXF, `${where}.jumpVelXF`),
-    jumpVelXB: toFx(ph.jumpVelXB, `${where}.jumpVelXB`),
+    jumpVelY: toFx(jp(ph.jumpVelY), `${where}.jumpVelY`),
+    jumpVelXF: toFx(mv(ph.jumpVelXF), `${where}.jumpVelXF`),
+    jumpVelXB: toFx(mv(ph.jumpVelXB), `${where}.jumpVelXB`),
     gravity: toFx(ph.gravity, `${where}.gravity`),
     airDrag: toFx(ph.airDrag, `${where}.airDrag`),
     groundFriction: toFx(ph.groundFriction, `${where}.groundFriction`),
     airJumps: ph.airJumps | 0,
-    weightPct: ph.weightPct | 0,
+    // The authored weightPct is the baseline; the rating is mass on top of it.
+    weightPct: byTrait(ph.weightPct, inverse(t.weight)),
     landingLag: ph.landingLag | 0,
 
     standPush,
@@ -363,6 +446,7 @@ export const compileChar = (def: CharDef): CompiledChar => {
 
     moveOrder: def.moveOrder,
     moves,
+    traits: t,
     def,
   };
 };

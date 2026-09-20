@@ -143,6 +143,12 @@ export const CHAR_B: CharDef = {
   dance: 'Caporal',
   hp: 1000,
   conceptSpace: CS,
+  /** Machona — the same all-rounder build swung into the kick instead. */
+  traits: {
+    movement: 100, jump: 100,
+    punch: 100, kick: 110,
+    weight: 100, stamina: 105,
+  },
   physics: {
     walkF: 4.0, walkB: 3.4,
     dashSpeed: 9.0, dashFrames: 20,

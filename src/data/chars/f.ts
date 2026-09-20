@@ -143,25 +143,36 @@ export const CHAR_F: CharDef = {
   dance: 'Diablada',
   hp: 1000,
   conceptSpace: CS,
+  /** Virtud — baseline in every respect but the leap. 114 launch on top of
+   *  her own lighter gravity is what puts her apex half again above the
+   *  roster's; see the note on `gravity` below. */
+  traits: {
+    movement: 100, jump: 114,
+    punch: 100, kick: 100,
+    weight: 100, stamina: 100,
+  },
   physics: {
     walkF: 4.0, walkB: 3.4,
     dashSpeed: 9.0, dashFrames: 20,
     backDashSpeed: 8.0, backDashFrames: 22,
     runDash: true,
-    // THE LONGEST JUMP ON THE ROSTER, and the only physics that differ from
-    // the baseline. Virtud is DRAWN with wings — they are in the art already,
-    // nothing here adds them or makes her fly — so hers is the jump that ought
-    // to match the silhouette: a harder launch and lighter gravity, higher and
-    // hanging longer. 412 units against 278, 58 airborne frames against 45.
+    // THE LONGEST JUMP ON THE ROSTER. Virtud is DRAWN with wings — they are in
+    // the art already, nothing here adds them or makes her fly — so hers is the
+    // jump that matches the silhouette: 412 units against 278, 58 airborne
+    // frames against 45.
     //
-    // The horizontal speeds are the roster's, untouched, so the extra distance
-    // is bought entirely with air time. That is what "higher, and therefore
-    // longer" means, and it is why this is not simply a buff: half again as
-    // long in the air is half again as long committed, unable to block, with
-    // the landing telegraphed. Measured against A in scripts/check-rules.ts.
+    // It takes BOTH knobs, and this is the one place the pair is used together.
+    // `jumpVelY` below is the roster's baseline, unchanged; her 114 jump rating
+    // scales it. GRAVITY is the other half, and it is authored here rather than
+    // rated because "how high" and "how floaty" are different feels: the rating
+    // throws her up, the light gravity is what keeps her there.
+    //
+    // The horizontal speeds are the roster's, so the extra distance is bought
+    // entirely with air time. Not simply a buff: half again as long in the air
+    // is half again as long committed, unable to block, landing telegraphed.
     //
     // Still one jump, no air jump, no glide, no flight.
-    jumpSquat: 4, jumpVelY: 27.5, jumpVelXF: 5.0, jumpVelXB: 4.4,
+    jumpSquat: 4, jumpVelY: 24.2, jumpVelXF: 5.0, jumpVelXB: 4.4,
     gravity: 0.95, airDrag: 1.0, groundFriction: 0.84,
     airJumps: 0, weightPct: 100, landingLag: 3,
   },

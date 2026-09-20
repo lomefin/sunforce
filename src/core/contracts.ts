@@ -243,6 +243,8 @@ export enum Ev {
   THROW_START, THROW_TECH, THROW_LAND,
   LAND, JUMP, DASH, WALL_HIT, KNOCKDOWN, WAKEUP,
   KO, ROUND_START, ROUND_END, MATCH_END, COMBO_END,
+  /** Two strikes met on the same frame: no damage, both shoved apart. */
+  CLASH,
 }
 
 // -----------------------------------------------------------------------------
@@ -467,6 +469,53 @@ export interface JiggleDef {
   readonly limit: number;
 }
 
+// -----------------------------------------------------------------------------
+// TRAITS. One rating per axis, 100 = the baseline every authored number already
+// describes, 80..120 = the band the roster lives in. They are NOT a second
+// physics system: `data/compile.ts` folds them into the compiled numbers once,
+// at build time, and the sim reads exactly the fields it always did. A roster of
+// all-100 characters compiles byte-identically to one with no traits at all.
+//
+// WHY RATINGS AND NOT RAW NUMBERS. "Diablo hits 10% harder and slides 20% less"
+// is a balance decision; `jumpVelY: 21.78` is its consequence. Keeping the
+// decision in one legible place means retuning a character is one integer, and
+// means the six can be compared down a column instead of by reading six
+// physics blocks side by side.
+// -----------------------------------------------------------------------------
+
+export interface TraitsDef {
+  /** Walk, dash and horizontal air speed. */
+  readonly movement: number;
+  /** Launch velocity. Apex scales with the SQUARE of this, air time linearly,
+   *  so one rating moves both "how high" and "how long" — which is how a jump
+   *  actually works. Floatiness is `PhysicsDef.gravity` and stays separate. */
+  readonly jump: number;
+  /** Damage dealt by punches — the 5P / 2P / JP family. */
+  readonly punch: number;
+  /** Damage dealt by kicks — the 5K / 2K / JK family. */
+  readonly kick: number;
+  /** MASS. Higher = harder to move: knockback received scales as 100/weight,
+   *  so 120 slides 0.83x as far and 90 slides 1.11x. This is the number a
+   *  clash divides by, which is why two kicks meeting push the lighter one
+   *  further. */
+  readonly weight: number;
+  /** Recovery speed. Attack recovery scales as 100/stamina, so 105 is back to
+   *  neutral 5% sooner and gets more hits into the same window. */
+  readonly stamina: number;
+}
+
+/** The rating every authored number is already written for. */
+export const TRAIT_BASE = 100;
+/** The band the roster is balanced inside. The validator warns outside it. */
+export const TRAIT_MIN = 80;
+export const TRAIT_MAX = 120;
+
+/** All-baseline. A character with these compiles to the authored numbers. */
+export const NEUTRAL_TRAITS: TraitsDef = {
+  movement: TRAIT_BASE, jump: TRAIT_BASE, punch: TRAIT_BASE,
+  kick: TRAIT_BASE, weight: TRAIT_BASE, stamina: TRAIT_BASE,
+};
+
 export interface CharDef {
   readonly id: CharId;
   readonly name: string;
@@ -474,6 +523,9 @@ export interface CharDef {
   /** THE GAME RULE. */
   readonly hp: 1000;
   readonly conceptSpace: ConceptSpace;
+  /** Ratings, folded into `physics` and into move damage by data/compile.ts.
+   *  The `physics` block below is always the BASELINE, written as if 100. */
+  readonly traits: TraitsDef;
   readonly physics: PhysicsDef;
   readonly standPush: ConceptBox;
   readonly crouchPush: ConceptBox;
@@ -587,6 +639,9 @@ export interface CompiledChar {
   readonly moveOrder: readonly MoveId[];
   /** Indexed by MoveId. Sparse: entries this character does not own are null. */
   readonly moves: readonly (CompiledMove | null)[];
+  /** The ratings these numbers were compiled FROM. Carried for tests, the
+   *  debug overlay and the clash, which needs both fighters' weights. */
+  readonly traits: TraitsDef;
   readonly def: CharDef;
 }
 
@@ -1247,6 +1302,18 @@ export interface MatchConfig {
 // 16. TUNABLE CONSTANTS. Every one an integer; every one referenced by name.
 //     Lives here so the sim, the data and the validator cannot disagree.
 // -----------------------------------------------------------------------------
+
+/**
+ * THE CLASH. Two strikes landing on the same frame cancel: neither fighter
+ * takes damage, and both are shoved apart by this much, world units per frame,
+ * BEFORE each fighter's own weight scales it. Scaled by `weightPct` exactly as
+ * knockback is, so the lighter fighter slides further — a Tinku meeting a
+ * Diablo goes 1.11x while the Diablo goes 0.83x.
+ *
+ * Sits between a jab's kbX (2.4) and a kick's (4.6): a trade should read as a
+ * real collision without launching either of them across the stage.
+ */
+export const CLASH_PUSH = 4.0;
 
 export const SIM_HZ = 60;
 export const SIM_DT_MS = 1000 / 60;

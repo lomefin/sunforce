@@ -143,6 +143,13 @@ export const CHAR_C: CharDef = {
   dance: 'Tinku',
   hp: 1000,
   conceptSpace: CS,
+  /** Macho Tinku — fast, light and quick to recover, but every strike lands
+   *  soft. Tinku is a brawl: he gets more hits in and takes more to finish. */
+  traits: {
+    movement: 110, jump: 95,
+    punch: 95, kick: 90,
+    weight: 90, stamina: 105,
+  },
   physics: {
     walkF: 4.0, walkB: 3.4,
     dashSpeed: 9.0, dashFrames: 20,
