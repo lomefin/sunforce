@@ -20,13 +20,26 @@
 // WHO OWNS THE TRANSITION: core/loop.ts. A scene returns the next scene from
 // `tick`; the loop calls exit(), swaps, then enter(). Nothing here calls any of
 // those on anything but itself.
+//
+// THE ROUND INTRO LIVES HERE, NOT IN THE SIM
+//   "3, 2, 1, GO" is presentation. src/sim/state.ts opens a round in
+//   `RoundState.FIGHT` on purpose, and the headless tests call `createState`
+//   then `step` and expect hits to land immediately — an INTRO state in the sim
+//   would silently break every one of them. So the FIGHT SCENE holds instead:
+//   for the first `INTRO_TOTAL_FRAMES` ticks it does not call `match.advance`,
+//   and src/ui/intro.ts draws the countdown over the frame. The fighters stand
+//   still because the sim is not advancing. No gating, no new sim state, no
+//   hash change.
 // =============================================================================
 
 import { B, LOGICAL_H, LOGICAL_W } from '@/core/contracts';
-import type { ButtonMask, InputSource, MatchConfig, Scene } from '@/core/contracts';
+import type {
+  ButtonMask, InputSource, InstanceWriter, MatchConfig, Renderer, Scene,
+} from '@/core/contracts';
 import { QuadBatch, orthoMat3 } from '@/gfx/batch';
 import { createSelect } from '@/ui/select';
 import type { SelectController } from '@/ui/select';
+import { INTRO_TOTAL_FRAMES, drawIntro } from '@/ui/intro';
 import { DEFAULT_MATCH, createMatch } from '@/game/match';
 import type { GameDeps, Match } from '@/game/match';
 
@@ -92,7 +105,42 @@ export const detachSelectHotkey = (): void => {
 };
 
 // -----------------------------------------------------------------------------
+// THE OVERLAY HOOK
+//
+// The round intro paints over the FINISHED frame, HUD included, which needs the
+// renderer's batch and its screen-space ortho. `Renderer` in core/contracts.ts
+// knows about neither and must not learn: that file is frozen and the headless
+// harness imports it. So `FightRenderer` grew ONE additive method, `drawOverlay`,
+// and this is the narrow structural bridge to it — exactly the trick
+// gfx/renderer.ts uses to reach a skin's `material` without widening
+// `CharacterSkin`.
+// -----------------------------------------------------------------------------
+
+interface OverlayHost {
+  drawOverlay(emit: (out: InstanceWriter) => void): void;
+}
+
+/** The renderer's overlay hook, or null for one that has none. */
+const overlayHostOf = (r: Renderer): OverlayHost | null => {
+  const maybe = r as unknown as Partial<OverlayHost>;
+  return typeof maybe.drawOverlay === 'function' ? (maybe as OverlayHost) : null;
+};
+
+// -----------------------------------------------------------------------------
 // FightScene
+//
+// THE INTRO IS A HOLD, NOT A GATE. For `INTRO_TOTAL_FRAMES` sim ticks after
+// `enter()`, `tick` does everything it normally does EXCEPT call
+// `match.advance(...)`. The fighters stand still because nothing is stepping
+// them; the round clock has not started because `roundTimer` only moves inside
+// `step`. No flag reaches SimState, no hash moves, and the 45 headless tests —
+// which call `createState` and `step` directly and never touch a Scene — cannot
+// see any of it.
+//
+// Because the counter is a FIELD OF THE SCENE and every route back into a fight
+// builds a new scene (see `SelectScene.cancel` and `createFightScene`), coming
+// back from the select screen replays the countdown for free: new match, new
+// intro.
 // -----------------------------------------------------------------------------
 
 let live: Match | null = null;
@@ -103,7 +151,24 @@ export const activeMatch = (): Match | null => live;
 class FightScene implements Scene {
   private match: Match | null = null;
 
+  /** Sim ticks the intro has been on screen. `enter()` puts it back to 0. */
+  private introFrame = 0;
+  /**
+   * The tick the fight begins on: `INTRO_TOTAL_FRAMES`, or 0 for a renderer
+   * that cannot draw the overlay. A countdown nobody can see is not a countdown,
+   * it is three and a half seconds of a dead stage — so a renderer without the
+   * hook gets no intro at all rather than a silent freeze.
+   */
+  private introEnd = 0;
+  private overlay: OverlayHost | null = null;
+
   constructor(private readonly deps: GameDeps, private readonly cfg: MatchConfig) {}
+
+  /** Bound once per scene rather than per drawn frame: `draw` runs 60 times a
+   *  second and the loop is deliberately allocation-free. */
+  private readonly emitIntro = (out: InstanceWriter): void => {
+    drawIntro(out, this.introFrame);
+  };
 
   enter(): void {
     // The press that brought us here must not immediately bounce us out.
@@ -112,13 +177,31 @@ class FightScene implements Scene {
     m.prime();
     this.match = m;
     live = m;
+
+    this.overlay = overlayHostOf(this.deps.renderer);
+    this.introFrame = 0;
+    this.introEnd = this.overlay === null ? 0 : INTRO_TOTAL_FRAMES;
   }
 
   tick(sources: readonly [InputSource, InputSource], frame: number): Scene | null {
     const m = this.match;
     if (m === null) return null;
-    // Checked BEFORE stepping, so the frame '[' is pressed is not also simulated.
+    // Checked BEFORE stepping, so the frame '[' is pressed is not also
+    // simulated — and checked before the intro hold, so '[' works during it.
     if (consumeSelectRequest()) return createSelectScene(this.deps, m.cfg);
+
+    if (this.introFrame < this.introEnd) {
+      this.introFrame++;
+      // Polled and thrown away. `StickyLatch` (input/buffer.ts) remembers a tap
+      // that began and ended between two ticks, so NOT polling would bank every
+      // mashed button of the countdown and spend it all on the first frame of
+      // the fight. Draining discards only those stale taps: a latch reports
+      // HELD keys live, so walking forward out of "GO" still works.
+      sources[0].poll(frame);
+      sources[1].poll(frame);
+      return null;
+    }
+
     m.advance(sources, frame);
     return null;
   }
@@ -127,12 +210,16 @@ class FightScene implements Scene {
     const m = this.match;
     if (m === null) return;
     this.deps.renderer.draw(m.state, m.prev, alpha, dtMs);
+    // On top of the whole frame, the HUD included — which is why it goes after
+    // `renderer.draw` and not inside it.
+    if (this.introFrame < this.introEnd) this.overlay?.drawOverlay(this.emitIntro);
   }
 
   exit(): void {
     if (live === this.match) live = null;
     this.match?.dispose();
     this.match = null;
+    this.overlay = null;
   }
 }
 

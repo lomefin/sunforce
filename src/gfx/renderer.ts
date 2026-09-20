@@ -13,8 +13,8 @@
 // =============================================================================
 
 import type {
-  CharacterSkin, CompiledChar, CompiledMove, FighterView, PlayerIx, PoseBuffer,
-  PoseHint, Renderer, SimState, StageDef, StateBuf,
+  CharacterSkin, CompiledChar, CompiledMove, FighterView, InstanceWriter, PlayerIx,
+  PoseBuffer, PoseHint, Renderer, SimState, StageDef, StateBuf,
 } from '@/core/contracts';
 import type { Material } from '@/gfx/batch';
 import { AnimId, Bone, MoveId, S } from '@/core/contracts';
@@ -207,6 +207,38 @@ export class FightRenderer implements Renderer {
 
     this.drawHud(batch, s);
     batch.flush();
+  }
+
+  // --- overlay -------------------------------------------------------------
+
+  /**
+   * ONE ADDITIVE HOOK: paint OVER a finished frame, HUD included. Its first
+   * caller is the round intro (src/ui/intro.ts, driven by game/scenes.ts).
+   *
+   * It TAKES the drawing instead of handing out the tools, because the two
+   * things an overlay needs — the batch and the screen-space ortho — are
+   * private here and must stay private: a caller given the batch could leave it
+   * half-filled, on the wrong material, or with the view matrix still on screen
+   * space when the next frame's world pass begins. So we set the HUD's fixed
+   * 1920x1080 ortho (y UP, the same one `drawHud` uses), bind the flat
+   * material, let `emit` push quads, flush, and restore the world matrix.
+   *
+   * CALL IT AFTER `draw` RETURNS: the batch has no depth test and no sort, so
+   * push order is paint order and `emit` lands on top of everything. With no
+   * batch (before `init`, after `dispose`) it is a no-op.
+   *
+   * Deliberately NOT on the `Renderer` contract — contracts.ts is frozen and
+   * shared with the headless harness. game/scenes.ts reaches it structurally.
+   */
+  drawOverlay(emit: (out: InstanceWriter) => void): void {
+    const batch = this.batch;
+    if (batch === null) return;
+    orthoInto(this.hud, 0, BASE_W, 0, BASE_H);
+    batch.setViewProj(this.hud);
+    batch.use(batch.solidMaterial);
+    emit(batch);
+    batch.flush();
+    batch.setViewProj(this.mat);
   }
 
   // --- stage ---------------------------------------------------------------
