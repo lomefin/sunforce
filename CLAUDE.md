@@ -151,6 +151,17 @@ of them must be **3:1** (2172x724 today) — the stage geometry assumes it.
 `npm run check` asserts every declared backdrop is actually built, because a
 missing one is a black screen with a countdown over it and nothing else warns.
 
+**Every painting puts its ground somewhere different.** STAGE_1's layer is placed
+for the Caporal pier deck, 0.73 of the way down that image; a painting with a
+deeper foreground leaves the fighters hanging above it. `TroupeTheme.backdropShiftY`
+raises the panorama by that difference, in world units — the panorama is 1400 units
+over 724 source pixels, so a fraction `f` of the image is `f * 1400`. The camera
+needs 900 units of art above the ground line and 170 below, which bounds the shift
+to about -125..+210 and is asserted in `npm run check`.
+
+To measure a new one: draw a line at 0.73 of the image height, see where it falls
+against the floor a fighter should stand on, and convert the gap.
+
 ## Art folders — what goes where
 
 ```
