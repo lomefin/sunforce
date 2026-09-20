@@ -1,0 +1,21 @@
+{
+  "name": "sunforce",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SunForce \u2014 a 2D fighting game of Bolivian carnival dances",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "check": "esbuild scripts/check-rules.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/sf-check.mjs --alias:@=./src --log-level=error && node node_modules/.cache/sf-check.mjs",
+    "verify": "npm run typecheck && npm run check",
+    "sheets": "python3 tools/build-sheets.py"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  }
+}

@@ -1,0 +1,16 @@
+# --- dependencies & build output -------------------------------------------
+node_modules/
+dist/
+
+# --- GENERATED ART ----------------------------------------------------------
+# Everything under public/art/ is produced from assets/ by `npm run sheets`:
+# sprite atlases, their sheet JSON, roster.json, staged stages and portraits.
+# ~42 MB, fully reproducible, and it changes on every rebuild. Regenerate with:
+#     npm run sheets
+public/art/
+
+# --- local noise ------------------------------------------------------------
+.DS_Store
+*.local
+*.tmp.png
+node_modules/.cache/
