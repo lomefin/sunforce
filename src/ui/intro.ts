@@ -21,6 +21,15 @@
 //   nothing to leak between matches, and the timeline can be reasoned about (or
 //   asserted) without a GL context.
 //
+// THE COUNTDOWN LANDS ON THE MUSIC
+//   Each troupe's track has its own downbeat, so the timeline is not one fixed
+//   length any more: `introTimingFor(goAtMs)` inserts a HOLD — stage visible,
+//   music playing, nothing written on screen — between the fade and the "3", so
+//   that the word GO appears exactly `goAtMs` into the track. The fade and the
+//   three beats keep their authored lengths at every setting; only the hold
+//   moves, which is why a track can be given a LATER downbeat but never an
+//   earlier one than the count itself takes. See src/data/troupes.ts.
+//
 // FRAMES, NOT MILLISECONDS
 //   The counter advances once per SIM TICK, which core/loop.ts fixes at
 //   `SIM_HZ`. Durations are AUTHORED in ms below and converted once, so the
@@ -60,45 +69,100 @@ export const INTRO_GO_FRAMES = framesOf(INTRO_GO_MS);       // 30
  * Where the fight scene is in the sequence. `DONE` is not a beat: it is the
  * frame the sim starts stepping, which is why it is a phase and not a boolean.
  */
-export enum IntroPhase { FADE = 0, THREE, TWO, ONE, GO, DONE }
+export enum IntroPhase { FADE = 0, HOLD, THREE, TWO, ONE, GO, DONE }
 
 /** 3, derived from the enum rather than written twice. */
 export const INTRO_COUNT_FROM = IntroPhase.GO - IntroPhase.THREE;
 export const INTRO_COUNT_FRAMES = INTRO_COUNT_FROM * INTRO_BEAT_FRAMES;
 
-/** 210 frames = 3.5 s. The exact number of sim ticks the fight scene holds. */
-export const INTRO_TOTAL_FRAMES =
-  INTRO_FADE_FRAMES + INTRO_COUNT_FRAMES + INTRO_GO_FRAMES;
+/**
+ * The earliest GO can possibly happen: the fade plus the three beats, with no
+ * hold at all. 3000 ms. A track asking for less than this is clamped up rather
+ * than having its countdown rushed — the beats are the game's rhythm, not the
+ * track's.
+ */
+export const INTRO_MIN_GO_AT_MS =
+  ((INTRO_FADE_FRAMES + INTRO_COUNT_FRAMES) * 1000) / SIM_HZ;
+
+/**
+ * One intro's shape. Built once per fight from the track's `goAtMs` and then
+ * passed to every function here, which keeps all of them pure functions of
+ * their arguments — the same frame and the same timing always draw the same
+ * pixels, with nothing cached between matches.
+ */
+export interface IntroTiming {
+  /** Stage-visible frames between the fade and the "3". 0 at the default. */
+  readonly holdFrames: number;
+  /** First frame of "3". */
+  readonly countStart: number;
+  /** First frame of "GO" — the number `goAtMs` was really asking for. */
+  readonly goFrame: number;
+  /** Frames the fight scene holds before it starts stepping the sim. */
+  readonly totalFrames: number;
+}
+
+/**
+ * The timeline whose GO lands `goAtMs` into the track, clamped to
+ * `INTRO_MIN_GO_AT_MS`. Rounding is done once, on the hold, so the fade and the
+ * beats keep their exact authored frame counts at every setting.
+ */
+export const introTimingFor = (goAtMs: number): IntroTiming => {
+  const want = Math.max(INTRO_MIN_GO_AT_MS, goAtMs);
+  const holdFrames = framesOf(want - INTRO_MIN_GO_AT_MS);
+  const countStart = INTRO_FADE_FRAMES + holdFrames;
+  const goFrame = countStart + INTRO_COUNT_FRAMES;
+  return { holdFrames, countStart, goFrame, totalFrames: goFrame + INTRO_GO_FRAMES };
+};
+
+/**
+ * How long the fight scene may sit on frame 0 waiting for the track to actually
+ * start before it gives up and runs the countdown anyway. A decode is tens of
+ * milliseconds, so this is never reached in practice — it exists so that a
+ * missing file, a silent fallback or an audio stack that never unlocks costs a
+ * quarter second of black and not a countdown that never begins.
+ */
+export const INTRO_SYNC_WAIT_FRAMES = framesOf(250);
+
+/** The unmodified 3.5 s timeline: 750 ms of black, then 3 · 2 · 1 · GO. */
+export const DEFAULT_INTRO_TIMING: IntroTiming = introTimingFor(INTRO_MIN_GO_AT_MS);
+
+/** 210 frames = 3.5 s, the default timeline's length. Kept for callers that
+ *  have no per-track timing to hand. */
+export const INTRO_TOTAL_FRAMES = DEFAULT_INTRO_TIMING.totalFrames;
 
 /** The first frame of a phase, counted from `enter()`. */
-export const introPhaseStart = (p: IntroPhase): number =>
+export const introPhaseStart = (p: IntroPhase, t: IntroTiming = DEFAULT_INTRO_TIMING): number =>
   p <= IntroPhase.FADE ? 0
-    : p >= IntroPhase.DONE ? INTRO_TOTAL_FRAMES
-      : p === IntroPhase.GO ? INTRO_FADE_FRAMES + INTRO_COUNT_FRAMES
-        : INTRO_FADE_FRAMES + (p - IntroPhase.THREE) * INTRO_BEAT_FRAMES;
+    : p === IntroPhase.HOLD ? INTRO_FADE_FRAMES
+      : p >= IntroPhase.DONE ? t.totalFrames
+        : p === IntroPhase.GO ? t.goFrame
+          : t.countStart + (p - IntroPhase.THREE) * INTRO_BEAT_FRAMES;
 
 /** Frames a phase lasts. Only the beats and GO have a length worth asking for. */
-export const introPhaseFrames = (p: IntroPhase): number =>
+export const introPhaseFrames = (p: IntroPhase, t: IntroTiming = DEFAULT_INTRO_TIMING): number =>
   p === IntroPhase.FADE ? INTRO_FADE_FRAMES
-    : p === IntroPhase.GO ? INTRO_GO_FRAMES
-      : p >= IntroPhase.DONE ? 0
-        : INTRO_BEAT_FRAMES;
+    : p === IntroPhase.HOLD ? t.holdFrames
+      : p === IntroPhase.GO ? INTRO_GO_FRAMES
+        : p >= IntroPhase.DONE ? 0
+          : INTRO_BEAT_FRAMES;
 
 /** The phase `frame` falls in. Negative frames read as FADE, so a caller that
  *  counts from somewhere else cannot skip the black. */
-export const introPhaseAt = (frame: number): IntroPhase => {
+export const introPhaseAt = (frame: number, t: IntroTiming = DEFAULT_INTRO_TIMING): IntroPhase => {
   if (frame < INTRO_FADE_FRAMES) return IntroPhase.FADE;
-  const t = frame - INTRO_FADE_FRAMES;
-  if (t < INTRO_COUNT_FRAMES) {
-    return (IntroPhase.THREE + Math.floor(t / INTRO_BEAT_FRAMES)) as IntroPhase;
+  if (frame < t.countStart) return IntroPhase.HOLD;
+  const c = frame - t.countStart;
+  if (c < INTRO_COUNT_FRAMES) {
+    return (IntroPhase.THREE + Math.floor(c / INTRO_BEAT_FRAMES)) as IntroPhase;
   }
-  return t < INTRO_COUNT_FRAMES + INTRO_GO_FRAMES ? IntroPhase.GO : IntroPhase.DONE;
+  return frame < t.totalFrames ? IntroPhase.GO : IntroPhase.DONE;
 };
 
 /** Has the fight been handed over? The scene's whole condition, in one call. */
-export const introDone = (frame: number): boolean => frame >= INTRO_TOTAL_FRAMES;
+export const introDone = (frame: number, t: IntroTiming = DEFAULT_INTRO_TIMING): boolean =>
+  frame >= t.totalFrames;
 
-/** What a phase puts on screen. FADE and DONE draw no text. */
+/** What a phase puts on screen. FADE, HOLD and DONE draw no text. */
 export const introLabel = (p: IntroPhase): string =>
   p === IntroPhase.GO ? 'GO'
     : p >= IntroPhase.THREE && p <= IntroPhase.ONE
@@ -260,9 +324,11 @@ const drawBand = (out: InstanceWriter, wipe: number, alpha: number, accent: numb
 };
 
 /** One beat: band, then glyph, and for GO the bar that underlines the handover. */
-const drawBeat = (out: InstanceWriter, phase: IntroPhase, local: number): void => {
+const drawBeat = (
+  out: InstanceWriter, phase: IntroPhase, local: number, t: IntroTiming,
+): void => {
   const go = phase === IntroPhase.GO;
-  const shape = beatShape(local, introPhaseFrames(phase));
+  const shape = beatShape(local, introPhaseFrames(phase, t));
   if (shape.alpha <= 0) return;
 
   drawBand(out, shape.wipe, shape.alpha, go ? COL_GO : ACCENT_COUNT);
@@ -305,12 +371,19 @@ const drawFade = (out: InstanceWriter, frame: number): void => {
 /**
  * THE WHOLE OVERLAY for one frame of the intro, drawn in the renderer's fixed
  * 1920x1080 screen-space ortho (y UP). `frame` counts sim ticks since the fight
- * scene was entered; past `INTRO_TOTAL_FRAMES` this draws nothing, so a caller
- * that keeps calling it costs a comparison and no quads.
+ * scene was entered; past the timing's `totalFrames` this draws nothing, so a
+ * caller that keeps calling it costs a comparison and no quads.
+ *
+ * FADE and HOLD draw no glyph — the hold is the stage and the music with the
+ * screen otherwise clear, which is exactly the point of it.
  */
-export const drawIntro = (out: InstanceWriter, frame: number): void => {
-  const phase = introPhaseAt(frame);
+export const drawIntro = (
+  out: InstanceWriter, frame: number, t: IntroTiming = DEFAULT_INTRO_TIMING,
+): void => {
+  const phase = introPhaseAt(frame, t);
   if (phase === IntroPhase.DONE) return;
-  if (phase !== IntroPhase.FADE) drawBeat(out, phase, frame - introPhaseStart(phase));
+  if (phase !== IntroPhase.FADE && phase !== IntroPhase.HOLD) {
+    drawBeat(out, phase, frame - introPhaseStart(phase, t), t);
+  }
   drawFade(out, frame);   // last, and over the top of all of it
 };

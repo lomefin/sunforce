@@ -56,7 +56,11 @@ import { createSelect } from '@/ui/select';
 import type { SelectController } from '@/ui/select';
 import { createModeSelect } from '@/ui/mode';
 import type { ModeController } from '@/ui/mode';
-import { INTRO_TOTAL_FRAMES, drawIntro } from '@/ui/intro';
+import {
+  DEFAULT_INTRO_TIMING, INTRO_SYNC_WAIT_FRAMES, drawIntro, introTimingFor,
+} from '@/ui/intro';
+import type { IntroTiming } from '@/ui/intro';
+import { themeForOpponent } from '@/data/troupes';
 import {
   DEFAULT_MATCH, MatchEndWatch, ONE_PLAYER, TWO_PLAYER,
   configForMode, createMatch, modeOf,
@@ -157,10 +161,14 @@ class FightScene implements Scene {
 
   /** Sim ticks the intro has been on screen. `enter()` puts it back to 0. */
   private introFrame = 0;
-  /** The tick the fight begins on: `INTRO_TOTAL_FRAMES`, or 0 for a renderer
+  /** The tick the fight begins on: the timing's own length, or 0 for a renderer
    *  that cannot draw the overlay — a countdown nobody can see is not a
    *  countdown, it is three and a half seconds of a dead stage. */
   private introEnd = 0;
+  /** This match's timeline, from the troupe track's downbeat. */
+  private introTiming: IntroTiming = DEFAULT_INTRO_TIMING;
+  /** Frames spent on frame 0 waiting for the track to start. See `atDownbeat`. */
+  private syncWait = 0;
   private overlay: OverlayHost | null = null;
 
   /** The match-over latch. It, and not `g.matchOver`, is what the transition
@@ -176,8 +184,28 @@ class FightScene implements Scene {
   /** Bound once per scene rather than per drawn frame: `draw` runs 60 times a
    *  second and the loop is deliberately allocation-free. */
   private readonly emitIntro = (out: InstanceWriter): void => {
-    drawIntro(out, this.introFrame);
+    drawIntro(out, this.introFrame, this.introTiming);
   };
+
+  /**
+   * Hold frame 0 until the track is actually sounding, so that a countdown
+   * timed to land six seconds in agrees with the recording about where zero is.
+   *
+   * It waits ONLY when there is a downbeat coming. `settled` is false while the
+   * AudioContext is still suspended — the browser keeps it that way until a
+   * real keypress, and the game boots straight into a fight — so on the very
+   * first match this returns false immediately rather than holding a black
+   * screen for music that cannot start yet. The cap covers the rest: a missing
+   * file, a muted build, an unlock that never comes.
+   */
+  private atDownbeat(): boolean {
+    const music = this.deps.music;
+    if (music === undefined) return true;
+    if (this.syncWait >= INTRO_SYNC_WAIT_FRAMES) return true;
+    if (!music.settled || music.rolling) return true;
+    this.syncWait++;
+    return false;
+  }
 
   enter(): void {
     // The press that brought us here must not immediately bounce us out.
@@ -187,13 +215,21 @@ class FightScene implements Scene {
     this.match = m;
     live = m;
 
-    // The stage theme comes up UNDER the 750 ms fade, so the music is already
-    // running by the time the first numeral lands.
-    this.deps.music?.stageTheme(this.deps.registry.stages[m.cfg.stage]!);
+    // WHICH TRACK, AND WHEN GO LANDS ON IT. Both come from the troupe player
+    // two belongs to (data/troupes.ts), not from the backdrop — three troupes
+    // share one stage today. A troupe with no track of its own falls back to
+    // whatever the StageDef declares, and to the default 3.5 s countdown.
+    const theme = themeForOpponent(this.deps.registry, m.cfg.chars[1]);
+    // The theme comes up UNDER the 750 ms fade, so the music is already running
+    // by the time the first numeral lands.
+    this.deps.music?.stageTheme(this.deps.registry.stages[m.cfg.stage]!, theme?.musicId);
 
     this.overlay = overlayHostOf(this.deps.renderer);
     this.introFrame = 0;
-    this.introEnd = this.overlay === null ? 0 : INTRO_TOTAL_FRAMES;
+    this.syncWait = 0;
+    this.introTiming =
+      theme === null ? DEFAULT_INTRO_TIMING : introTimingFor(theme.goAtMs);
+    this.introEnd = this.overlay === null ? 0 : this.introTiming.totalFrames;
     this.endWatch.reset();
   }
 
@@ -207,7 +243,9 @@ class FightScene implements Scene {
     if (consumeSelectRequest()) return createModeScene(this.deps, m.cfg, this.mode);
 
     if (this.introFrame < this.introEnd) {
-      this.introFrame++;
+      // Frame 0 is held until the track is sounding; every frame after it is
+      // counted off the track's own clock.
+      if (this.introFrame > 0 || this.atDownbeat()) this.introFrame++;
       // Polled and thrown away. `StickyLatch` (input/buffer.ts) banks a tap that
       // began and ended between two ticks, so NOT polling would spend every
       // mashed button of the countdown on the first frame of the fight. Only

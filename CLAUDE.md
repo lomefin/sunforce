@@ -74,6 +74,12 @@ Never rename them — a character's display name changing must never move a file
 
 **Stages stay sequential in the UI too** — "Stage 1", not a place name.
 
+**Fight music is the one exception, and it is not a stage id.** The track is
+chosen by the troupe, not the backdrop, so it is named for the troupe:
+`stage-caporal`, `stage-tinku`, `stage-diablada`. No `StageId` maps to these and
+no stage declares them — see `src/data/troupes.ts`. `StageDef.musicId`
+(`stage-1`) is still sequential and is still the fallback.
+
 ## Uniform look — placeholders stay uniform
 
 Two standing rules, both deliberate:
@@ -106,8 +112,24 @@ the simulation or the renderer's core.
 
 ## Audio
 
-Stage music is supplied by the user later as audio files dropped into `public/audio/`.
-Keep the music bus loading data-driven and tolerant of missing files.
+Music is supplied by the user as files dropped into `public/audio/music/`, and
+loading it is CONVENTION, not configuration: `<musicId>.<ext>`, with the loader
+trying webm, ogg, m4a, mp3 in that order. A missing file is silence plus one
+console warning — never a crash. Replacing a track is a file swap and nothing
+else, which is why `select.mp3` can be changed without touching code.
+
+**Fight music follows the troupe of the character on the RIGHT** — player two.
+Six characters, three troupes, three tracks; all three currently share one
+backdrop. `src/data/troupes.ts` is the whole mapping.
+
+**Each track says when "GO" lands on it.** `TroupeTheme.goAtMs` is measured from
+the first frame of the intro, which is also when the track starts, so `6000`
+means the word GO appears six seconds into the music. `ui/intro.ts` spends the
+difference as a HOLD between the fade and the "3" — it never rushes the count or
+shortens the fade, so a track can be given a later downbeat but never an earlier
+one than `INTRO_MIN_GO_AT_MS` (3000 ms). The fight scene waits on the frame 0
+for the track to actually start before counting, so the countdown and the
+recording agree about where zero is.
 
 ## Art folders — what goes where
 

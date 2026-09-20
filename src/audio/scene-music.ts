@@ -72,10 +72,33 @@ export interface SceneMusic {
   readonly wanted: string | null;
   /** True once the intent has actually been handed to the player. */
   readonly settled: boolean;
+  /**
+   * True when the wanted track is ACTUALLY sounding — the node has started, not
+   * merely been asked for. `settled` says the request reached the player;
+   * this says the first sample has played.
+   *
+   * The round intro reads it to start its countdown on the downbeat rather than
+   * on `enter()`, because a decode takes tens of milliseconds and a countdown
+   * timed to land six seconds into a track has to agree with the track about
+   * where zero is.
+   */
+  readonly rolling: boolean;
   /** The character select screen. Idempotent: re-entering does not restart. */
   selectTheme(): void;
-  /** The fight. Plays `stage.musicId` with the stage's own loop points. */
-  stageTheme(stage: StageDef): void;
+  /**
+   * The fight. Plays `stage.musicId` with the stage's own loop points — or,
+   * when `musicId` is given, that track instead.
+   *
+   * THE OVERRIDE EXISTS FOR THE TROUPE THEMES (src/data/troupes.ts): the track
+   * is chosen by the character on the right, not by the backdrop, and three
+   * troupes share one stage today. The stage's own id stays the fallback.
+   *
+   * An overridden track gets NO loop points. `StageDef.loopStart/loopEnd` are
+   * timestamps measured against the stage's OWN recording; replaying them over
+   * a different file would seam it in the wrong place, which is worse than
+   * letting it loop end to end.
+   */
+  stageTheme(stage: StageDef, musicId?: string): void;
   /** Fade to nothing. Idempotent. */
   silence(fadeSeconds?: number): void;
   /** Stops and forgets. Safe to call twice. */
@@ -173,6 +196,10 @@ export const createSceneMusic = (graph: AudioGraph, player: MusicPlayer): SceneM
       return applied === (wish?.id ?? null);
     },
 
+    get rolling(): boolean {
+      return wish !== null && player.nowPlaying === wish.id;
+    },
+
     selectTheme(): void {
       // No loop points: the select theme is a loop from end to end. If it ever
       // gains an intro, it gains them here and nowhere else.
@@ -182,18 +209,24 @@ export const createSceneMusic = (graph: AudioGraph, player: MusicPlayer): SceneM
       });
     },
 
-    stageTheme(stage: StageDef): void {
+    stageTheme(stage: StageDef, musicId?: string): void {
+      const id = musicId ?? stage.musicId;
       // An empty musicId is a stage that declares no music — silence, not a
       // 404 hunt for `public/audio/music/.mp3`.
-      if (stage.musicId === '') {
+      if (id === '') {
         silenceFade = FADE_OUT;
         request(null);
+        return;
+      }
+      if (id !== stage.musicId) {
+        // An overridden track: by id alone, loop points deliberately dropped.
+        request({ id, start: (p) => void p.playId(id) });
         return;
       }
       // `play(stage)` rather than `playId(stage.musicId)`: the StageDef is the
       // only place the loop points live, and this keeps them travelling with
       // the stage instead of being re-derived here.
-      request({ id: stage.musicId, start: (p) => void p.play(stage) });
+      request({ id, start: (p) => void p.play(stage) });
     },
 
     silence(fadeSeconds = FADE_OUT): void {

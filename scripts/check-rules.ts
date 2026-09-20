@@ -8,6 +8,11 @@ import { step } from '../src/sim/step';
 import { REGISTRY } from '../src/data/registry';
 import { layoutText, measureText } from '../src/ui/font';
 import { MODE_TEXT_BOXES } from '../src/ui/mode';
+import {
+  INTRO_BEAT_FRAMES, INTRO_FADE_FRAMES, INTRO_MIN_GO_AT_MS, IntroPhase,
+  introPhaseAt, introPhaseFrames, introTimingFor,
+} from '../src/ui/intro';
+import { DEFAULT_GO_AT_MS, TROUPE_THEMES, themeForOpponent } from '../src/data/troupes';
 
 let failures = 0;
 const check = (label: string, got: unknown, want: unknown): void => {
@@ -359,6 +364,85 @@ import { animOfState } from '../src/gfx/renderer';
   // font metrics changed underneath the layout.
   const wasWide = measureText('THE OPPONENT IS THE CPU, ITS FIGHTER DRAWN AT RANDOM', { size: 20 });
   check('regression: the old blurb really was wider than its card', wasWide > 700, true);
+}
+
+// =============================================================================
+// THE TROUPE THEME, AND THE DOWNBEAT THE COUNTDOWN LANDS ON
+// -----------------------------------------------------------------------------
+// The fight's music is chosen by the troupe PLAYER TWO belongs to, and each
+// track says when the word GO should appear on it. Both are pure lookups, so
+// both are checkable with no audio stack and no browser.
+{
+  const SIM_HZ_MS = 1000 / 60;
+  const msOf = (frames: number): number => frames * SIM_HZ_MS;
+
+  // Every character resolves to a track, and the six map onto exactly three.
+  const ids = [CharId.A, CharId.B, CharId.C, CharId.D, CharId.E, CharId.F]
+    .map((id) => themeForOpponent(REGISTRY, id));
+  check('troupes: every character has a track', ids.every((t) => t !== null), true);
+  check('troupes: six characters, three tracks',
+    new Set(ids.map((t) => t?.musicId)).size, 3);
+  check('troupes: A and B share the caporal track',
+    ids[0]?.musicId === ids[1]?.musicId && ids[0]?.musicId === 'stage-caporal', true);
+  check('troupes: C and D share the tinku track',
+    ids[2]?.musicId === ids[3]?.musicId && ids[2]?.musicId === 'stage-tinku', true);
+  check('troupes: E and F share the diablada track',
+    ids[4]?.musicId === ids[5]?.musicId && ids[4]?.musicId === 'stage-diablada', true);
+
+  // It is PLAYER TWO's troupe that picks the track, not player one's. Reading
+  // the wrong index is the one bug this whole feature can have.
+  check('troupes: the track follows player two',
+    themeForOpponent(REGISTRY, CharId.E)?.musicId, 'stage-diablada');
+  check('troupes: ...and not player one',
+    themeForOpponent(REGISTRY, CharId.A)?.musicId, 'stage-caporal');
+
+  // data/troupes.ts hard-codes 3000 as its default and promises it equals the
+  // shortest timeline ui/intro.ts can produce. If the fade or a beat is ever
+  // retimed, this is what says so.
+  check('intro: the data default matches the intro floor',
+    DEFAULT_GO_AT_MS, INTRO_MIN_GO_AT_MS);
+
+  // The default timeline is EXACTLY what shipped before per-track timing: a
+  // 750 ms fade, three beats, GO at 3.0 s, 3.5 s in total.
+  const base = introTimingFor(DEFAULT_GO_AT_MS);
+  check('intro: default has no hold', base.holdFrames, 0);
+  check('intro: default GO lands at 3000 ms', msOf(base.goFrame), 3000);
+  check('intro: default runs 210 frames', base.totalFrames, 210);
+
+  // The diablada track: GO six seconds in, to the frame.
+  const dia = introTimingFor(6000);
+  check('intro: diablada GO lands at 6000 ms', msOf(dia.goFrame), 6000);
+  check('intro: the extra time is all hold', dia.holdFrames, dia.goFrame - base.goFrame);
+  check('intro: the fade is untouched by a later downbeat',
+    introPhaseFrames(IntroPhase.FADE, dia), INTRO_FADE_FRAMES);
+  check('intro: the beats keep their rhythm',
+    introPhaseFrames(IntroPhase.THREE, dia), INTRO_BEAT_FRAMES);
+
+  // Phases in order across the stretched timeline. The hold draws nothing, so
+  // a player sees the stage and hears the track with the screen otherwise clear.
+  check('intro: frame 0 is the fade', IntroPhase[introPhaseAt(0, dia)], 'FADE');
+  check('intro: after the fade comes the hold',
+    IntroPhase[introPhaseAt(INTRO_FADE_FRAMES, dia)], 'HOLD');
+  check('intro: the count starts after the hold',
+    IntroPhase[introPhaseAt(dia.countStart, dia)], 'THREE');
+  check('intro: GO is on its own frame', IntroPhase[introPhaseAt(dia.goFrame, dia)], 'GO');
+  check('intro: the frame before GO is still counting',
+    IntroPhase[introPhaseAt(dia.goFrame - 1, dia)], 'ONE');
+  check('intro: the fight is handed over at the end',
+    IntroPhase[introPhaseAt(dia.totalFrames, dia)], 'DONE');
+
+  // A track asking for an IMPOSSIBLY early downbeat is clamped, never rushed:
+  // the fade and the three beats are the game's rhythm, not the recording's.
+  check('intro: an early downbeat clamps to the floor',
+    introTimingFor(0).totalFrames, base.totalFrames);
+
+  // Every registered track must be timeable — no negative or fractional holds.
+  const sane = TROUPE_THEMES.every((t) => {
+    const timing = introTimingFor(t.goAtMs);
+    return timing.holdFrames >= 0 && Number.isInteger(timing.holdFrames)
+      && timing.goFrame < timing.totalFrames;
+  });
+  check('intro: every troupe track has a sane timeline', sane, true);
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
