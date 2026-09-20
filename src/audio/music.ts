@@ -31,6 +31,13 @@
 // have to hear the hit first, ducks by an amount that depends on how loud the
 // sample happened to be, and pumps.
 //
+// ONE CODE PATH, TWO DOORS. `playId(musicId)` is the real entry point: a music
+// id is all the audio layer has ever needed, and screens that are not stages
+// (the character select) have one too. `play(stage)` is a four-line wrapper
+// that reads `musicId` / `loopStart` / `loopEnd` off the StageDef and calls
+// `playId`. There is no second start path to keep in sync, and no fake StageDef
+// invented so that a menu can have a theme.
+//
 // PRESENTATION ONLY: nothing here reads SimState, and every call is safe before
 // the context has been unlocked — a source started on a suspended context plays
 // from its first sample the moment the user's first keypress resumes it.
@@ -48,14 +55,23 @@ const FADE_OUT = 0.6;
 /** How fast a duck falls. ~3 time constants to arrive, so this is ~36 ms. */
 const DUCK_ATTACK_TAU = 0.012;
 
+/** Loop points in SECONDS, exactly as the node wants them. Both optional. */
+export interface LoopPoints {
+  readonly loopStart?: number;
+  readonly loopEnd?: number;
+}
+
 export interface MusicPlayer {
   /** musicId of the track currently playing, or null for silence. */
   readonly nowPlaying: string | null;
   /**
-   * Plays `stage.musicId`. Missing file => silence + one warning from the
-   * loader, never a rejection. Calling it again with the same stage is a no-op,
-   * so a scene re-enter does not restart the track.
+   * Plays the track at `public/audio/music/<musicId>.<ext>`. Missing file =>
+   * silence + one warning from the loader, never a rejection. Calling it again
+   * with the id that is already playing — or already being decoded — is a
+   * no-op, so a scene re-enter does not restart the track.
    */
+  playId(musicId: string, opts?: LoopPoints): Promise<void>;
+  /** `playId` with the ids and loop points read off a stage. */
   play(stage: StageDef): Promise<void>;
   stop(fadeSeconds?: number): void;
   /** 0..1 (above 1 is allowed but the limiter will take it back). */
@@ -77,6 +93,13 @@ export const createMusicPlayer = (graph: AudioGraph, loader: AudioLoader): Music
   let source: AudioBufferSourceNode | null = null;
   let trackGain: GainNode | null = null;
   let currentId: string | null = null;
+  /**
+   * The id that has been asked for but is still decoding. `currentId` only
+   * becomes true once the node is started, and a decode is tens of
+   * milliseconds, so without this a scene that asks twice in that window (a
+   * transition plus a re-enter) starts two sources and the track doubles.
+   */
+  let pendingId: string | null = null;
   let volume = music.gain.value;
   let disposed = false;
   /** Guards against an await landing after a newer play()/stop() overtook it. */
@@ -105,6 +128,7 @@ export const createMusicPlayer = (graph: AudioGraph, loader: AudioLoader): Music
     source = null;
     trackGain = null;
     currentId = null;
+    pendingId = null;
     if (node === null || g === null) return;
 
     const t = ctx.currentTime;
@@ -122,39 +146,45 @@ export const createMusicPlayer = (graph: AudioGraph, loader: AudioLoader): Music
    * edited stage def) falls back to looping the whole thing rather than
    * producing a 3 ms stutter that is very hard to diagnose by ear.
    */
-  const loopWindow = (stage: StageDef, dur: number): readonly [number, number] => {
-    const rawStart = stage.loopStart ?? 0;
-    const rawEnd = stage.loopEnd ?? 0;
+  const loopWindow = (id: string, opts: LoopPoints | undefined, dur: number): readonly [number, number] => {
+    const rawStart = opts?.loopStart ?? 0;
+    const rawEnd = opts?.loopEnd ?? 0;
     const start = Number.isFinite(rawStart) && rawStart > 0 && rawStart < dur ? rawStart : 0;
     const end = Number.isFinite(rawEnd) && rawEnd > start && rawEnd <= dur ? rawEnd : 0;
     if ((rawStart > 0 || rawEnd > 0) && start === 0 && end === 0) {
       warnOnce(
-        `loop:${stage.musicId}`,
-        `stage "${stage.id}" declares loopStart/loopEnd outside its ${dur.toFixed(2)}s ` +
-          `music file — looping the whole buffer instead.`,
+        `loop:${id}`,
+        `music "${id}" was given loopStart/loopEnd outside its ${dur.toFixed(2)}s ` +
+          `file — looping the whole buffer instead.`,
       );
     }
     return [start, end]; // 0 / 0 means "whole buffer" to the node, by spec.
   };
 
-  const play = async (stage: StageDef): Promise<void> => {
+  const playId = async (musicId: string, opts?: LoopPoints): Promise<void> => {
     if (disposed) return;
-    const id = stage.musicId;
+    const id = musicId;
     if (id === '') return;
-    if (currentId === id && source !== null) return; // already playing this stage
+    if (currentId === id && source !== null) return; // already playing this track
+    if (pendingId === id) return; // already on its way in
 
     stop(FADE_OUT);
     const mine = ++epoch;
+    pendingId = id; // set AFTER stop(), which clears it.
 
     const buf = await loader.load('music', id);
     // Overtaken while decoding, torn down, or there is simply no file: the
     // loader has already logged the one warning it owes and we play silence.
-    if (buf === null || disposed || mine !== epoch) return;
+    if (disposed || mine !== epoch) return;
+    if (buf === null) {
+      pendingId = null;
+      return;
+    }
 
     const node = ctx.createBufferSource();
     node.buffer = buf;
     node.loop = true;
-    const [loopStart, loopEnd] = loopWindow(stage, buf.duration);
+    const [loopStart, loopEnd] = loopWindow(id, opts, buf.duration);
     node.loopStart = loopStart;
     node.loopEnd = loopEnd;
 
@@ -173,6 +203,7 @@ export const createMusicPlayer = (graph: AudioGraph, loader: AudioLoader): Music
       node.start(t);
     } catch (err) {
       warnOnce(`start:${id}`, `could not start music "${id}" — playing silence.`, err);
+      pendingId = null;
       try {
         node.disconnect();
         g.disconnect();
@@ -185,6 +216,7 @@ export const createMusicPlayer = (graph: AudioGraph, loader: AudioLoader): Music
     source = node;
     trackGain = g;
     currentId = id;
+    pendingId = null;
 
     // The node is live on the audio thread either way, but on a context that
     // has not been unlocked yet nothing comes out until the first keypress.
@@ -198,11 +230,21 @@ export const createMusicPlayer = (graph: AudioGraph, loader: AudioLoader): Music
     }
   };
 
+  /**
+   * The stage door. Four lines and no logic of its own: every guarantee above —
+   * the same-id no-op, the crossfade out of the previous track, silence on a
+   * missing file — is `playId`'s, so a stage and a menu screen behave
+   * identically.
+   */
+  const play = (stage: StageDef): Promise<void> =>
+    playId(stage.musicId, { loopStart: stage.loopStart, loopEnd: stage.loopEnd });
+
   return {
     get nowPlaying(): string | null {
       return currentId;
     },
 
+    playId,
     play,
     stop,
 
