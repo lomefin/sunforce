@@ -417,7 +417,14 @@ export class FightRenderer implements Renderer {
     // A sprite skin blits (anim, frame); a skeletal skin ignores both and uses
     // the solved pose. One interface, so both paths coexist.
     const anim = move !== null ? move.anim : animOfState(f);
-    const animFrame = move !== null ? f.actionFrame : f.stateFrame;
+    // A ROUND win holds the FIRST celebration pose and nothing more — there is
+    // another round coming and a full dance in the middle of a match reads as
+    // the match being over. Winning the MATCH plays the clip out. Same clip,
+    // same state; the only difference is whether its frame counter advances.
+    const celebrating = move === null && f.state === S.WIN_POSE;
+    const animFrame = move !== null ? f.actionFrame
+      : celebrating && s.g.matchOver === 0 ? 0
+        : f.stateFrame;
 
     batch.use(materialOf(skin, batch.solidMaterial));
     skin.emit(batch, pose, {

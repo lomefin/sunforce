@@ -7,6 +7,7 @@ import {
 } from '../src/core/contracts';
 import { winBannerText } from '../src/ui/intro';
 import { createCpuSource } from '../src/input/cpu';
+import { MATCH_END_HOLD_FRAMES } from '../src/game/match';
 import { fx, px } from '../src/core/fixed';
 import { charOf, createState } from '../src/sim/state';
 import { hurtBoxesOf } from '../src/sim/collision';
@@ -1112,6 +1113,16 @@ import { animOfState } from '../src/gfx/renderer';
     }
     check('win: a double KO has no winner to celebrate', anyone, false);
   }
+
+  // A ROUND WIN HOLDS ONE POSE; A MATCH WIN DANCES. The clip is the same; what
+  // differs is whether its frame counter advances, so the check is that the
+  // scene stays up long enough for the second pose to be reached at all.
+  check('win: the match hold outlasts the celebration',
+    MATCH_END_HOLD_FRAMES > 96, true);
+  // ...and still leaves before the sim resets the result out from under it.
+  // 420 is MATCH_END_FRAMES, private to sim/step.ts.
+  check('win: ...but still leaves before the sim resets it',
+    MATCH_END_HOLD_FRAMES < 420, true);
 
   // THE TWO SHAPES OF CELEBRATION, read off the built sheets: a Caporal strikes
   // a pose and settles into a second, a Tinku keeps swapping between them.

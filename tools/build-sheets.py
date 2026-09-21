@@ -128,6 +128,19 @@ def require_imagemagick():
 def mg(args):
     return subprocess.run(im_argv(args), capture_output=True, text=True).stdout.strip()
 
+def has_alpha(path):
+    """Does this frame carry a real alpha channel?
+
+    A sprite without one is not a sprite. The crop below is driven ENTIRELY by
+    alpha, so an opaque export has a bounding box of the whole canvas: the
+    background gets packed into the atlas as part of the frame, the character is
+    anchored on the canvas edge instead of on its own soles, and it renders as a
+    rectangle of background colour standing in the wrong place. That is exactly what
+    `female-caporal-win-2.png` did — a black box, out of bounds.
+
+    Cheaper to refuse it here than to explain it later."""
+    return mg([path, '-format', '%A', 'info:']).strip().lower() not in ('undefined', 'false')
+
 def bbox(path, crop=None):
     a = [path] + (['-crop', crop, '+repage'] if crop else [])
     a += ['-alpha','extract','-threshold',ALPHA_FLOOR,'-format','%@','info:']
@@ -195,9 +208,14 @@ def scan():
         if not CLIP_RE.match(m.group(2)):
             print(f'  ! skip (malformed clip name "{m.group(2)}", '
                   f'expected <clip> or <clip>-<n>): {fn}'); skipped += 1; continue
-        groups[m.group(1)][m.group(2)] = os.path.join(SRC, fn)
+        full = os.path.join(SRC, fn)
+        if not has_alpha(full):
+            print(f'  ! skip (no alpha channel — would pack as an opaque '
+                  f'rectangle): {fn}'); skipped += 1; continue
+        groups[m.group(1)][m.group(2)] = full
     if skipped:
-        print(f'  ! {skipped} file(s) skipped — fix the name or they will never ship')
+        print(f'  ! {skipped} file(s) skipped — fix the name or the alpha, or '
+              f'they will never ship')
     return groups
 
 def measure(path, is_air):

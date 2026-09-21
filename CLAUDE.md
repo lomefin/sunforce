@@ -258,6 +258,24 @@ Art is `<costume>-win-1.png`, `-win-2.png`, and the troupe decides how it plays:
 That table is `WIN_STYLE` in the builder. A troupe not listed holds, because a
 held pose can look stiff but a looped one can look broken.
 
+**A ROUND win holds `win-1` and nothing more** — there is another round coming,
+and a full dance mid-match reads as the match being over. **Winning the MATCH
+plays the clip out.** Same clip, same state; the only difference is whether its
+frame counter advances, which the renderer decides from `g.matchOver`.
+
+The match therefore stays on screen for `MATCH_END_HOLD_FRAMES` (360, six
+seconds) — the celebration is the only thing that ever plays in full, and
+cutting away at two seconds meant nobody saw it. That must stay under the sim's
+own `MATCH_END_FRAMES` (420), or `startNextMatch` clears the result while the
+scene is still waiting for it.
+
+**Every frame needs a real alpha channel.** The crop is driven entirely by
+alpha, so an opaque export has a bounding box of the whole canvas: the
+background is packed into the atlas, the character is anchored on the canvas
+edge instead of its own soles, and it renders as a rectangle of background
+colour in the wrong place. `npm run sheets` now refuses such a file by name
+rather than shipping it.
+
 ## The clash
 
 Two strikes landing on the **same frame** cancel: neither fighter takes damage

@@ -123,7 +123,11 @@ const KO_HOLD_FRAMES = KO_SLOWMO_FRAMES;
 /** Round banner hold, then the next round opens. §16 has no name for these two
  *  yet; they move there with sim/round.ts. */
 const ROUND_END_FRAMES = 90;
-const MATCH_END_FRAMES = 150;
+/** The match is over and the winner is dancing: this is how long the sim holds
+ *  the finished state before `startNextMatch` resets it. Long enough that
+ *  game/match.ts can sit on the celebration for a few seconds and still leave
+ *  with room to spare — see MATCH_END_HOLD_FRAMES, which must stay under it. */
+const MATCH_END_FRAMES = 420;
 
 /**
  * The winner of the round, or -1 for a draw.

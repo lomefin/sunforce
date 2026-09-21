@@ -207,13 +207,17 @@ export const configForMode = (cfg: MatchConfig, mode: PlayMode): MatchConfig => 
 /**
  * How long a finished match stays on screen before a scene may cut away.
  *
- * It MUST stay under the sim's own MATCH_END hold (`MATCH_END_FRAMES` = 150,
- * private to sim/step.ts): at 150 `startNextMatch` clears the score and drops
- * `matchOver` back to 0, so a scene that waits longer than the sim does watches
- * the result it was waiting for vanish and then waits forever. Two seconds of
- * the winning pose, and we are gone with half a second to spare.
+ * It MUST stay under the sim's own MATCH_END hold (`MATCH_END_FRAMES` = 420,
+ * private to sim/step.ts): at that point `startNextMatch` clears the score and
+ * drops `matchOver` back to 0, so a scene that waits longer than the sim does
+ * watches the result it was waiting for vanish and then waits forever.
+ *
+ * SIX SECONDS, because this is the only time the winner's full celebration
+ * plays — a round win holds a single pose, the match win dances — and cutting
+ * to the select screen two seconds in meant nobody ever saw it. We leave with
+ * a full second of the sim's hold still to spare.
  */
-export const MATCH_END_HOLD_FRAMES = 120;
+export const MATCH_END_HOLD_FRAMES = 360;
 
 /**
  * Who won the MATCH, or -1 while one is still running.
