@@ -1140,6 +1140,14 @@ import { animOfState } from '../src/gfx/renderer';
     check('win: ...after a beat on the first', cap.frames[0]!.dur < cap.frames[1]!.dur, true);
     check('win: a Tinku loops between its poses', tin.loopAt, 0);
     check('win: ...with the two evenly weighted', tin.frames[0]!.dur, tin.frames[1]!.dur);
+
+    // THE TWO DIABLADAS DO NOT CELEBRATE ALIKE, which is why WIN_STYLE lets a
+    // costume override its own troupe: Virtud strikes a pose and holds it,
+    // Diablo keeps moving. A troupe-only table could not express that.
+    check('win: Virtud holds her pose', winClip('f').loopAt, -1);
+    check('win: Diablo keeps moving', winClip('e').loopAt, 0);
+    check('win: ...overriding what his troupe does',
+      winClip('e').loopAt !== winClip('f').loopAt, true);
   }
 }
 

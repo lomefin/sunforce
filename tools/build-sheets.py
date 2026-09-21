@@ -75,10 +75,14 @@ DASH_CLIP_FRAMES = 20
 # troupe the costume belongs to. A troupe not listed here holds, which is the
 # safer default: a held pose can look stiff, a looped one can look broken.
 WIN_CLIP_FRAMES = 96
+# Keyed by TROUPE, because that is usually the right grain — but a costume may
+# override its own troupe, which Diablo does: the Diabladas do not celebrate
+# alike, he keeps moving and Virtud strikes a pose and holds it.
 WIN_STYLE = {
-    'caporal':  'hold',   # frame 1, a beat, then frame 2 and stay there
-    'tinku':    'loop',   # back and forth between the two
-    'diablada': 'hold',
+    'caporal':       'hold',   # frame 1, a beat, then frame 2 and stay there
+    'tinku':         'loop',   # back and forth between the two
+    'diablada':      'hold',   # Virtud
+    'male-diablada': 'loop',   # ...but Diablo does not stand still
 }
 # THE IDLE BREATH, in sim frames for one full cycle. A fighting game's rest pose
 # is never still. A full second read as sluggish on four drawings, so this is
@@ -360,7 +364,8 @@ def build(costume, clips):
     # THE WINNER'S POSE. No art -> it keeps standing in neutral, which is a
     # non-celebration rather than a broken one.
     win = series('win') or ['neutral']
-    style = WIN_STYLE.get(costume.split('-')[-1], 'hold')
+    # The costume's own entry wins; otherwise its troupe decides.
+    style = WIN_STYLE.get(costume) or WIN_STYLE.get(costume.split('-')[-1], 'hold')
     if style == 'loop':
         # Evenly split, looping: the two poses alternate for as long as it shows.
         wind = spread(WIN_CLIP_FRAMES, len(win))

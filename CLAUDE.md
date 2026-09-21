@@ -256,13 +256,16 @@ celebrates**, which is the correct answer to "who won that".
 
 Art is `<costume>-win-1.png`, `-win-2.png`, and the troupe decides how it plays:
 
-| troupe | | |
+| | | |
 |---|---|---|
-| Caporal | `hold` | frame 1 for a beat, then frame 2 and stay |
-| Tinku | `loop` | alternate between the two |
-| Diablada | `hold` | (no art yet — holds neutral) |
+| Caporal, Machona | `hold` | frame 1 for a beat, then frame 2 and stay |
+| Macho Tinku, Tinku Supay | `loop` | alternate between the two |
+| Virtud | `hold` | |
+| **Diablo** | `loop` | overrides his own troupe |
 
-That table is `WIN_STYLE` in the builder. A troupe not listed holds, because a
+That table is `WIN_STYLE` in the builder. It is keyed by TROUPE, because that is
+usually the right grain — but **a costume may override its troupe**, which is
+how the two Diabladas celebrate differently. A name not listed holds, because a
 held pose can look stiff but a looped one can look broken.
 
 **A ROUND win holds `win-1` and nothing more** — there is another round coming,
