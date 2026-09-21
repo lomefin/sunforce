@@ -192,9 +192,15 @@ by the same per-frame timer pass that counts it, so the usable gap is shorter at
 both ends. 20 gives about 13 usable frames. `npm run check` measures the real
 range rather than trusting the constant.
 
-The dash has no art of its own and borrows the WALK cycle run fast. Without a
-`DASH_F`/`DASH_B` clip the sheet falls back to **IDLE**, which made the move
-look like it had not happened at all.
+Art is `<costume>-dash.png`. A costume without one borrows the WALK cycle run
+fast — a fair substitute, but not the pose. Without any `DASH_F`/`DASH_B` clip
+at all the sheet falls back to **IDLE**, which made the move look like it had
+not happened.
+
+**Five drawings for six characters is correct**: Diablo's 90 movement means he
+can never dash, so he is the one who needs none. `npm run check` asserts that
+pairing from both ends — every character that CAN dash has art of its own, and
+the one who cannot is the one substituting.
 
 **It has to cover real ground or nobody sees it happen.** 18 u/f over 22 frames
 is ~345 units for a baseline character — about four times a walk of the same

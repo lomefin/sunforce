@@ -2,7 +2,8 @@
 // The sim is pure over (state, inputs), so it runs fine with no browser at all.
 import {
   AURA_COST_BLOCK, AURA_COST_DASH, AURA_COST_KICK, AURA_COST_PUNCH, AURA_DASH_MIN,
-  AURA_SCALE, B, CharId, DOUBLE_TAP_FRAMES, KO_SLOWMO_FRAMES, MoveId, ROUNDS_TO_WIN,
+  AURA_SCALE, B, CharId, DASH_MIN_MOVEMENT, DOUBLE_TAP_FRAMES, KO_SLOWMO_FRAMES,
+  MoveId, ROUNDS_TO_WIN,
   RoundState, S, StageId, WALL_PAD,
 } from '../src/core/contracts';
 import { winBannerText } from '../src/ui/intro';
@@ -1042,6 +1043,35 @@ import { animOfState } from '../src/gfx/renderer';
   // The view is 1477 units across at full zoom, so 300 is a fifth of the screen.
   check('dash: the dash state alone covers real ground', dashOnly(CharId.A) > 300, true);
   check('dash: a Tinku goes further still', dashOnly(CharId.C) > dashOnly(CharId.A), true);
+
+  // EVERY CHARACTER THAT CAN DASH HAS ART FOR IT. A costume with no `-dash`
+  // drawing borrows the walk cycle, which is a fair substitute but not the
+  // pose — so the test is that a dasher's DASH_F is NOT its WALK_F. Diablo is
+  // excluded by the same rating that stops him dashing at all, which is why
+  // there are five drawings for six characters and that is correct.
+  if (!existsSync('public/art/a.sheet.json')) {
+    console.log('SKIP  dash: sheets not built — run `npm run sheets`');
+  } else {
+    const firstUv = (slot: string, clip: string): string => {
+      const d = JSON.parse(readFileSync(`public/art/${slot}.sheet.json`, 'utf8')) as
+        { clips: Record<string, { frames: { uv: number[] }[] }> };
+      return (d.clips[clip]?.frames[0]?.uv ?? []).join(',');
+    };
+    const SLOTS = ['a', 'b', 'c', 'd', 'e', 'f'];
+    let missing = '';
+    let dashers = 0;
+    for (let id = 0 as CharId; id <= 5; id = (id + 1) as CharId) {
+      if (REGISTRY.chars[id]!.traits.movement < DASH_MIN_MOVEMENT) continue;
+      dashers++;
+      const slot = SLOTS[id]!;
+      if (firstUv(slot, 'DASH_F') === firstUv(slot, 'WALK_F')) missing += `${slot} `;
+    }
+    check('dash: every character that can dash has its own art', missing.trim(), '');
+    check('dash: ...which is five of the six', dashers, 5);
+    // And the one who cannot dash is the one without a drawing.
+    check('dash: Diablo neither dashes nor needs the art',
+      firstUv('e', 'DASH_F'), firstUv('e', 'WALK_F'));
+  }
 
   // THE BANNERS. Quechua, and the number is the PLAYER, not the round.
   check('banner: the win banner speaks Quechua', winBannerText(1), 'PUKLLAQ 1 LLALLIN');

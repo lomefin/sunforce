@@ -322,8 +322,12 @@ def build(costume, clips):
 
     # ~30-frame stride cycle however many drawings there are
     wdur = max(2, round(30 / max(1, len(walk))))
-    # The same drawings run through in the length of one dash.
-    ddur = max(1, round(DASH_CLIP_FRAMES / max(1, len(walk))))
+    # THE DASH has art of its own now. A costume without it borrows the WALK
+    # cycle run fast, which is what every costume did before the drawings
+    # existed — a dash reads as a hard lean either way, and anything beats the
+    # IDLE pose a missing clip falls back to.
+    dash = series('dash') or walk
+    ddur = max(1, round(DASH_CLIP_FRAMES / max(1, len(dash))))
 
     # THE HIT REACTIONS. soft = the wince (jab, 16f of hitstun), hard = the head
     # thrown back (kick, 21f). Both are grounded poses, so they measured on the
@@ -383,8 +387,8 @@ def build(costume, clips):
       "WIN":        {"loopAt":win_loop, "frames":[fr(n,d) for n,d in zip(win, wind)]},
       "WALK_F":     {"loopAt":0,  "frames":[fr(n,wdur) for n in walk]},
       "WALK_B":     {"loopAt":0,  "frames":[fr(n,wdur+1) for n in reversed(walk)]},
-      "DASH_F":     {"loopAt":0,  "frames":[fr(n,ddur) for n in walk]},
-      "DASH_B":     {"loopAt":0,  "frames":[fr(n,ddur) for n in reversed(walk)]},
+      "DASH_F":     {"loopAt":0,  "frames":[fr(n,ddur) for n in dash]},
+      "DASH_B":     {"loopAt":0,  "frames":[fr(n,ddur) for n in reversed(dash)]},
       "JUMP_SQUAT": {"loopAt":-1, "frames":[fr('neutral',1)]},
       "JUMP_RISE":  {"loopAt":-1, "frames":[fr(n,8) for n in rise]},
       "JUMP_FALL":  {"loopAt":-1, "frames":[fr(n,10) for n in fall]},
@@ -522,6 +526,7 @@ def main():
         'soft-hit': 'HIT_STAND (punch reaction)',
         'hard-hit': 'HIT_STAND_HARD (kick reaction)',
         'block':    'BLOCK_STAND / BLOCK_CROUCH / BLOCK_AIR',
+        'dash':     'DASH_F + DASH_B',
         'ko':       'KO (thrown, in the air)',
         'fallen':   'KNOCKDOWN (where the KO lands)',
         'win':      'WIN (the celebration)',
