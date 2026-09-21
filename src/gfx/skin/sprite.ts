@@ -162,11 +162,23 @@ export class SkinSprite implements CharacterSkin {
 
     // Atlas pixels -> UV. The quad's (0,0) corner is its BOTTOM-left and the
     // atlas is y-down, so v0 is the rect's BOTTOM edge and v0 > v1.
+    //
+    // INSET BY HALF A TEXEL on every side. The filter is LINEAR and the sheet
+    // is an ATLAS, so a UV sitting exactly on a frame boundary blends the edge
+    // column with whatever is outside the frame — CLAMP_TO_EDGE clamps to the
+    // ATLAS, not to the rect, so it does not help here. The builder's 4px
+    // gutter keeps that neighbour transparent rather than another pose, but a
+    // half-lit seam column is still wrong, and it is worse under the facing
+    // mirror below: a negative width flips the rasterisation, so the side that
+    // samples past the edge is the side that was fine before.
+    //
+    // Costs half a texel of the frame at 0.45 scale — well under a screen
+    // pixel, and it cannot be seen. The seam can.
     const tw = sheet.texW; const th = sheet.texH;
-    const u0 = fx0 / tw;
-    const u1 = (fx0 + fw) / tw;
-    const v0 = (fy0 + fh) / th;
-    const v1 = fy0 / th;
+    const u0 = (fx0 + 0.5) / tw;
+    const u1 = (fx0 + fw - 0.5) / tw;
+    const v0 = (fy0 + fh - 0.5) / th;
+    const v1 = (fy0 + 0.5) / th;
 
     const c = COSTUME[o.costume] ?? COSTUME[0]!;
     const i = writeSprite(
