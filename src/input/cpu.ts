@@ -38,7 +38,9 @@
 //   the swing fires on the first grounded frame. When j.P lands, that same
 //   press starts hitting in the air with no change here.
 // =============================================================================
-import { B, Contact, G, RoundState, S } from '@/core/contracts';
+import {
+  AURA_COST_KICK, AURA_SCALE, B, Contact, G, RoundState, S,
+} from '@/core/contracts';
 import type {
   ButtonMask, CharId, CompiledChar, CompiledMove, Facing, FighterView,
   InputSource, PlayerIx, SimState,
@@ -102,6 +104,9 @@ interface Strategy {
   readonly react: number;         // base reaction latency, before `level` adjusts it
   readonly restLo: number; readonly restHi: number;    // idle frames after a swing
   readonly retaliate: number;     // 0..100 answers a hit by coming forward
+  /** Frames spent disengaged after a combo lands or the pool runs short. A
+   *  rushdown backs off grudgingly; a charge character was leaving anyway. */
+  readonly recoverLo: number; readonly recoverHi: number;
 }
 
 /** Indexed by CharId, tuned against the shared frame data. Measured headlessly,
@@ -114,33 +119,39 @@ const STRATEGIES: readonly Strategy[] = [
   // mixes both buttons, blocks more often than not, punishes what it sees whiff.
   { style: ST_ROUND, near: 112, far: 152, margin: 0, kickPct: 45,
     aggression: 55, guardPct: 62, guardBack: true, jumpPct: 8, chainPct: 45,
-    thinkLo: 14, thinkHi: 26, react: 12, restLo: 10, restHi: 20, retaliate: 45 },
+    thinkLo: 14, thinkHi: 26, react: 12, restLo: 10, restHi: 20, retaliate: 45,
+    recoverLo: 50, recoverHi: 80 },
   // B heavyweight — the only one whose "back off" is still forward. Prefers the
   // kick, thinks slowly, barely blocks, and answers a hit by walking INTO you.
   { style: ST_WALL, near: 132, far: 158, margin: 0, kickPct: 78,
     aggression: 68, guardPct: 26, guardBack: false, jumpPct: 2, chainPct: 30,
-    thinkLo: 20, thinkHi: 34, react: 18, restLo: 12, restHi: 22, retaliate: 72 },
+    thinkLo: 20, thinkHi: 34, react: 18, restLo: 12, restHi: 22, retaliate: 72,
+    recoverLo: 60, recoverHi: 95 },
   // C rushdown — lives inside punch range on the shortest rest in the table (the
   // jab that FEELS four frames), gatlings whenever it touches you, never retreats.
   { style: ST_PRESS, near: 78, far: 116, margin: -4, kickPct: 15,
     aggression: 88, guardPct: 34, guardBack: false, jumpPct: 5, chainPct: 80,
-    thinkLo: 8, thinkHi: 14, react: 9, restLo: 4, restHi: 9, retaliate: 80 },
+    thinkLo: 8, thinkHi: 14, react: 9, restLo: 4, restHi: 9, retaliate: 80,
+    recoverLo: 28, recoverHi: 50 },
   // D aerial — wants to be a jump away, not a poke away, and closes over the
   // top. Drifts back out after landing rather than staying to brawl.
   { style: ST_AIR, near: 168, far: 236, margin: 2, kickPct: 60,
     aggression: 50, guardPct: 46, guardBack: true, jumpPct: 58, chainPct: 40,
-    thinkLo: 12, thinkHi: 22, react: 13, restLo: 12, restHi: 22, retaliate: 25 },
+    thinkLo: 12, thinkHi: 22, react: 13, restLo: 12, restHi: 22, retaliate: 25,
+    recoverLo: 45, recoverHi: 75 },
   // E trickster — the widest think span here, so its rhythm never settles, and
   // the only one that books a retreat BEHIND an approach: it walks in, you
   // respect it, and it is already leaving.
   { style: ST_FEINT, near: 126, far: 196, margin: 4, kickPct: 50,
     aggression: 60, guardPct: 50, guardBack: true, jumpPct: 18, chainPct: 50,
-    thinkLo: 5, thinkHi: 40, react: 11, restLo: 6, restHi: 26, retaliate: 35 },
+    thinkLo: 5, thinkHi: 40, react: 11, restLo: 6, restHi: 26, retaliate: 35,
+    recoverLo: 55, recoverHi: 90 },
   // F charge — hangs at the far end building up, then spends it all in one
   // straight run that ignores the guard reflex. All in, and all in is punishable.
   { style: ST_CHARGE, near: 180, far: 250, margin: 6, kickPct: 70,
     aggression: 45, guardPct: 40, guardBack: true, jumpPct: 4, chainPct: 35,
-    thinkLo: 18, thinkHi: 30, react: 15, restLo: 12, restHi: 22, retaliate: 30 },
+    thinkLo: 18, thinkHi: 30, react: 15, restLo: 12, restHi: 22, retaliate: 30,
+    recoverLo: 70, recoverHi: 110 },
 ];
 
 // --- Reading the defs: read-only, and driven by the compiled data -----------
@@ -215,6 +226,10 @@ class CpuSource implements InputSource {
 
   /** The motor: what the hands are doing, whatever the head decided. */
   private atkBit: ButtonMask = 0; private atkHold = 0; private atkLock = 0;
+  /** Frames left disengaging to let aura come back. See `breathe`. */
+  private recover = 0;
+  /** The combo count last seen, so a landed blow is an EDGE and not a level. */
+  private lastCombo = 0;
   private jumpHold = 0; private jumpLock = 0; private airTried = false;
 
   /** One roll per threat, per stun, per action. Never one per frame. */
@@ -258,6 +273,8 @@ class CpuSource implements InputSource {
     if (this.atkLock > 0) this.atkLock--;
     if (this.jumpLock > 0) this.jumpLock--;
     if (this.commit > 0) this.commit--;
+    if (this.recover > 0) this.recover--;
+    this.breathe(me);
 
     const facing = me.facing;
     const d = this.sample();
@@ -452,6 +469,40 @@ class CpuSource implements InputSource {
 
   private canSwing(dist: number): boolean {
     return this.ready() && this.strikeRange > 0 && dist <= this.strikeRange;
+  }
+
+  /**
+   * WHEN TO STOP PRESSING. Aura is a pool now: a swing costs 3 or 5 and comes
+   * back at about a point a second, so a CPU that keeps swinging simply has its
+   * attacks refused and stands there mashing into a wall. This is the CPU
+   * noticing that and walking it off instead.
+   *
+   * Two triggers, both edges rather than levels so it books the retreat once:
+   *
+   *   IT LANDED SOMETHING. A combo ending is the natural place to disengage —
+   *   it has taken its turn, and pressing on from here is what "pressing too
+   *   hard" looks like from the other side of the screen.
+   *
+   *   IT IS NEARLY DRY. Below one kick's worth it cannot threaten anything, so
+   *   standing in range is all risk and no offence.
+   *
+   * How long depends on the character: a rushdown backs off grudgingly, the
+   * charge character was leaving anyway.
+   */
+  private breathe(me: FighterView): void {
+    const combo = me.comboCount;
+    const landed = combo > 0 && combo < this.lastCombo;   // the combo just ended
+    this.lastCombo = combo;
+
+    if (this.recover > 0) return;                         // already walking it off
+    const dry = me.aura < AURA_COST_KICK * AURA_SCALE;
+    if (!landed && !dry) return;
+
+    this.recover = this.rng.range(this.st.recoverLo, this.st.recoverHi);
+    this.intent = IN_RETREAT;
+    this.planLeft = this.recover;
+    // Drop any swing it was about to throw: the whole point is to stop pressing.
+    this.atkLock = this.recover;
   }
 
   /** Commits the hands. `force` overrides the button choice (the gatling). */

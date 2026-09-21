@@ -64,6 +64,11 @@ BLOCKSTUN = 14
 # play through if a costume ever has more than one. KO_SLOWMO_FRAMES from
 # contracts.ts is the span it has to cover, and the sim runs it at 30% speed.
 KO_CLIP_FRAMES = 45
+# A dash is ~20 frames (CompiledChar.dashFrames). It has no art of its own, so
+# it borrows the WALK cycle run fast — a dash reads as a hard lean either way,
+# and rendering it as IDLE (which is what a missing clip falls back to) made the
+# move look like it had not happened at all.
+DASH_CLIP_FRAMES = 20
 # THE IDLE BREATH, in sim frames for one full cycle. A fighting game's rest pose
 # is never still. A full second read as sluggish on four drawings, so this is
 # two thirds of one: brisk enough to look alive, slow enough not to jitter.
@@ -284,6 +289,8 @@ def build(costume, clips):
 
     # ~30-frame stride cycle however many drawings there are
     wdur = max(2, round(30 / max(1, len(walk))))
+    # The same drawings run through in the length of one dash.
+    ddur = max(1, round(DASH_CLIP_FRAMES / max(1, len(walk))))
 
     # THE HIT REACTIONS. soft = the wince (jab, 16f of hitstun), hard = the head
     # thrown back (kick, 21f). Both are grounded poses, so they measured on the
@@ -320,6 +327,8 @@ def build(costume, clips):
       "KO":         {"loopAt":-1, "frames":[fr(n,d) for n,d in zip(ko, kod)]},
       "WALK_F":     {"loopAt":0,  "frames":[fr(n,wdur) for n in walk]},
       "WALK_B":     {"loopAt":0,  "frames":[fr(n,wdur+1) for n in reversed(walk)]},
+      "DASH_F":     {"loopAt":0,  "frames":[fr(n,ddur) for n in walk]},
+      "DASH_B":     {"loopAt":0,  "frames":[fr(n,ddur) for n in reversed(walk)]},
       "JUMP_SQUAT": {"loopAt":-1, "frames":[fr('neutral',1)]},
       "JUMP_RISE":  {"loopAt":-1, "frames":[fr(n,8) for n in rise]},
       "JUMP_FALL":  {"loopAt":-1, "frames":[fr(n,10) for n in fall]},

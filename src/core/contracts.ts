@@ -1364,8 +1364,16 @@ export const AURA_DASH_MIN = 90;
  *  however much aura they are holding. */
 export const DASH_MIN_MOVEMENT = 100;
 
-/** Frames a first tap stays live waiting for its partner. 1/5 of a second. */
-export const DOUBLE_TAP_FRAMES = 12;
+/**
+ * Frames a first tap stays live waiting for its partner.
+ *
+ * NOT the window you get: the counter is decremented by the same per-frame
+ * timer pass that counts it, so the usable gap is one frame shorter at each
+ * end. 20 gives about a fifth of a second of real slack, which is what a human
+ * double tap actually lands in — 12 measured out at roughly 10 usable frames
+ * and the dash simply refused to come out.
+ */
+export const DOUBLE_TAP_FRAMES = 20;
 
 export const SIM_HZ = 60;
 export const SIM_DT_MS = 1000 / 60;

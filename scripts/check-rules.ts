@@ -2,8 +2,11 @@
 // The sim is pure over (state, inputs), so it runs fine with no browser at all.
 import {
   AURA_COST_BLOCK, AURA_COST_DASH, AURA_COST_KICK, AURA_COST_PUNCH, AURA_DASH_MIN,
-  AURA_SCALE, B, CharId, KO_SLOWMO_FRAMES, MoveId, RoundState, S, StageId, WALL_PAD,
+  AURA_SCALE, B, CharId, DOUBLE_TAP_FRAMES, KO_SLOWMO_FRAMES, MoveId, RoundState,
+  S, StageId, WALL_PAD,
 } from '../src/core/contracts';
+import { winBannerText } from '../src/ui/intro';
+import { createCpuSource } from '../src/input/cpu';
 import { fx, px } from '../src/core/fixed';
 import { charOf, createState } from '../src/sim/state';
 import { hurtBoxesOf } from '../src/sim/collision';
@@ -983,6 +986,67 @@ import { animOfState } from '../src/gfx/renderer';
     virtud.koAt + virtud.landedAt < virtud.roundEnd, true);
   check('ko: the slowest of the three still lands in time',
     Math.max(tinku.landedAt, virtud.landedAt, diablo.landedAt) < KO_SLOWMO_FRAMES, true);
+}
+
+// =============================================================================
+// THE DASH WINDOW, THE BANNERS, AND A CPU THAT BREATHES
+// =============================================================================
+{
+  // THE DOUBLE TAP. The declared window is not the window you get: the counter
+  // is decremented by the same per-frame timer pass that counts it, so the
+  // usable gap is shorter at both ends. This measures the REAL range, because
+  // the declared 12 worked out to about 10 and the dash would not come out.
+  const dashAt = (gap: number): boolean => {
+    const s = createState(3, CharId.A, CharId.A, StageId.STAGE_1, REGISTRY);
+    const f = s.fighter(0);
+    step(s, B.L, 0);
+    for (let i = 0; i < gap; i++) step(s, 0, 0);
+    step(s, B.L, 0);
+    return f.state === S.DASH_F || f.state === S.DASH_B;
+  };
+  check('dash: a quick double tap dashes', dashAt(1), true);
+  check('dash: a lazy double tap still dashes', dashAt(10), true);
+  check('dash: and one most of the way out does too', dashAt(13), true);
+  check('dash: but a slow one does not', dashAt(DOUBLE_TAP_FRAMES + 4), false);
+
+  // It has to be worth the aura: a dash must cover meaningfully more ground
+  // than simply walking for the same time, or it is 10 points for nothing.
+  const cover = (dash: boolean): number => {
+    const s = createState(3, CharId.A, CharId.A, StageId.STAGE_1, REGISTRY);
+    const f = s.fighter(0);
+    const x0 = px(f.posX);
+    if (dash) { step(s, B.L, 0); step(s, 0, 0); step(s, B.L, 0); for (let i = 0; i < 25; i++) step(s, 0, 0); }
+    else for (let i = 0; i < 28; i++) step(s, B.L, 0);
+    return Math.abs(px(f.posX) - x0);
+  };
+  check('dash: covers well over twice a walk', cover(true) > cover(false) * 2, true);
+
+  // THE BANNERS. Quechua, and the number is the PLAYER, not the round.
+  check('banner: the win banner speaks Quechua', winBannerText(1), 'PUKLLAQ 1 LLALLIN');
+  check('banner: ...and names player two', winBannerText(2), 'PUKLLAQ 2 LLALLIN');
+
+  // A CPU THAT BREATHES. Aura is a pool now, so a CPU that keeps swinging just
+  // has its attacks refused and stands there mashing into a wall. It should
+  // disengage after it lands something and never bottom out.
+  const press = (id: CharId) => {
+    const s = createState(99, CharId.A, id, StageId.STAGE_1, REGISTRY);
+    const cpu = createCpuSource(s, { charId: id, player: 1, seed: 4242, level: 60 });
+    const f = s.fighter(1);
+    let min = Infinity;
+    let dry = 0;
+    for (let i = 0; i < 1800; i++) {
+      step(s, 0, cpu.poll(i));
+      const a = f.aura / AURA_SCALE;
+      if (a < min) min = a;
+      if (a < AURA_COST_KICK) dry++;
+    }
+    return { min, dry };
+  };
+  for (const [name, id] of [['Caporal', CharId.A], ['Macho Tinku', CharId.C], ['Diablo', CharId.E]] as const) {
+    const r = press(id);
+    check(`cpu: ${name} never runs its aura dry`, r.dry, 0);
+    check(`cpu: ${name} keeps a working reserve`, r.min > AURA_COST_KICK * 2, true);
+  }
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

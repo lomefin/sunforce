@@ -58,7 +58,8 @@ import type { SelectController } from '@/ui/select';
 import { createModeSelect } from '@/ui/mode';
 import type { ModeController } from '@/ui/mode';
 import {
-  DEFAULT_INTRO_TIMING, INTRO_SYNC_WAIT_FRAMES, drawIntro, introTimingFor,
+  DEFAULT_INTRO_TIMING, INTRO_SYNC_WAIT_FRAMES, WIN_BANNER_FRAMES,
+  drawIntro, drawRoundWin, introTimingFor,
 } from '@/ui/intro';
 import type { IntroTiming } from '@/ui/intro';
 import { stageForTroupe, themeForOpponent } from '@/data/troupes';
@@ -177,6 +178,9 @@ class FightScene implements Scene {
   /** The match-over latch. It, and not `g.matchOver`, is what the transition
    *  below reads once the flag has been seen: see the header. */
   private readonly endWatch = new MatchEndWatch();
+  /** Rounds scored so far, so a win is an EDGE and not a state to poll. */
+  private lastScored = 0;
+  private lastWins0 = 0;
 
   constructor(
     private readonly deps: GameDeps,
@@ -187,7 +191,15 @@ class FightScene implements Scene {
   /** Bound once per scene rather than per drawn frame: `draw` runs 60 times a
    *  second and the loop is deliberately allocation-free. */
   private readonly emitIntro = (out: InstanceWriter): void => {
-    drawIntro(out, this.introFrame, this.introTiming);
+    drawIntro(out, this.introFrame, this.introTiming, this.match?.state.g.roundNo ?? 0);
+  };
+
+  /** Frames since a round was won, and who won it. -1 while none has been. */
+  private winFrame = -1;
+  private winner = 0;
+
+  private readonly emitWin = (out: InstanceWriter): void => {
+    drawRoundWin(out, this.winFrame, this.winner);
   };
 
   /**
@@ -252,6 +264,10 @@ class FightScene implements Scene {
     this.introTiming = this.themeTiming;
     this.introEnd = this.overlay === null ? 0 : this.introTiming.totalFrames;
     this.endWatch.reset();
+    this.lastScored = m.state.g.p0Wins + m.state.g.p1Wins;
+    this.lastWins0 = m.state.g.p0Wins;
+    this.winFrame = -1;
+    this.winner = 0;
   }
 
   tick(sources: readonly [InputSource, InputSource], frame: number): Scene | null {
@@ -294,6 +310,23 @@ class FightScene implements Scene {
     // speed without needing to remember to.
     setTimeScalePct(m.state.g.roundState === RoundState.KO ? KO_TIMESCALE_PCT : 100);
 
+    // THE ROUND-WIN BANNER. Latched on the rising edge of the round's score,
+    // not polled off the round state: a round can be won by a KO or by the
+    // clock, and both routes bump exactly one of these counters. Counting our
+    // own frames after that means the banner is not at the mercy of how long
+    // the sim happens to sit in any particular state.
+    const wins0 = m.state.g.p0Wins;
+    const wins1 = m.state.g.p1Wins;
+    const scored = wins0 + wins1;
+    if (scored > this.lastScored) {
+      this.lastScored = scored;
+      this.winner = wins0 > this.lastWins0 ? 1 : 2;
+      this.lastWins0 = wins0;
+      this.winFrame = 0;
+    } else if (this.winFrame >= 0 && this.winFrame < WIN_BANNER_FRAMES) {
+      this.winFrame++;
+    }
+
     if (!this.endWatch.over(m.state)) return null;
     return createSelectScene(this.deps, m.cfg, this.mode);
   }
@@ -305,6 +338,9 @@ class FightScene implements Scene {
     // On top of the whole frame, the HUD included — which is why it goes after
     // `renderer.draw` and not inside it.
     if (this.introFrame < this.introEnd) this.overlay?.drawOverlay(this.emitIntro);
+    else if (this.winFrame >= 0 && this.winFrame < WIN_BANNER_FRAMES) {
+      this.overlay?.drawOverlay(this.emitWin);
+    }
   }
 
   exit(): void {

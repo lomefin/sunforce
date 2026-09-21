@@ -183,6 +183,15 @@ Double-tap forward or back. Gated twice, and both gates are the point:
 It is **cancellable into an attack**, which is the reason to spend aura closing
 distance: a dash is a way to get a hit out, not a way to jog.
 
+`DOUBLE_TAP_FRAMES` is **not** the window you get — the counter is decremented
+by the same per-frame timer pass that counts it, so the usable gap is shorter at
+both ends. 20 gives about 13 usable frames. `npm run check` measures the real
+range rather than trusting the constant.
+
+The dash has no art of its own and borrows the WALK cycle run fast. Without a
+`DASH_F`/`DASH_B` clip the sheet falls back to **IDLE**, which made the move
+look like it had not happened at all.
+
 The HUD shows aura as a slim gold bar under the health, with a notch at the dash
 threshold — so the gate is something you can see rather than discover by
 pressing.
@@ -205,6 +214,16 @@ corpse does not finish its flinch, and the whole arc has to land inside
 
 Art is `<costume>-ko.png`, built into a held (never looped) `KO` clip. A costume
 without one falls back to its heaviest hit reaction.
+
+## What the overlay says
+
+- **"ROUND n"** rides above the countdown from the moment the black lifts until
+  GO hands over. It fades rather than slams: the digits are the clock and want
+  the eye, the round number is context.
+- **"PUKLLAQ n LLALLIN"** — Quechua for *player n wins* — stamps when a round is
+  taken. Latched on the rising edge of the round score, not polled off the round
+  state, because a round can be won by a KO **or** by the clock and both routes
+  bump exactly one counter.
 
 ## The clash
 

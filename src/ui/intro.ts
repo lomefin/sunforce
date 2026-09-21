@@ -377,13 +377,99 @@ const drawFade = (out: InstanceWriter, frame: number): void => {
  * FADE and HOLD draw no glyph — the hold is the stage and the music with the
  * screen otherwise clear, which is exactly the point of it.
  */
+/** Size of the ROUND banner, and how far above the numeral it rides. */
+const ROUND_SIZE = 96;
+const ROUND_TRACKING = 18;
+const ROUND_RISE = 250;
+
+/**
+ * "ROUND 1", above the countdown. It comes up the moment the black lifts and
+ * stays until GO hands the fight over, so the number is on screen for the whole
+ * count rather than flashing past as one more beat in the sequence.
+ *
+ * It fades in over the hold instead of slamming like the digits do: the digits
+ * are the clock and want the eye, the round number is context.
+ */
+const drawRound = (out: InstanceWriter, frame: number, round: number, t: IntroTiming): void => {
+  if (round <= 0) return;
+  // Up over the first half-second after the fade, then held.
+  const inAt = INTRO_FADE_FRAMES;
+  const alpha = clamp01((frame - inAt) / 30);
+  if (alpha <= 0) return;
+  // Gone by the time GO lands: the fight is starting, the round number is done.
+  const out1 = frame >= t.goFrame ? clamp01(1 - (frame - t.goFrame) / INTRO_GO_FRAMES) : 1;
+  const a = alpha * out1;
+  if (a <= 0) return;
+
+  const text = `ROUND ${round}`;
+  const baseline = CENTER_Y + ROUND_RISE - ROUND_SIZE * 0.5;
+  const edge = ROUND_SIZE * EDGE_RATIO;
+  const at = (dx: number, dy: number, color: number, al: number, z: number): void => {
+    drawText(out, text, CENTER_X + dx, baseline + dy, {
+      size: ROUND_SIZE, tracking: ROUND_TRACKING, align: 'center', color, alpha: al, z,
+    });
+  };
+  at(ROUND_SIZE * DROP_RATIO, -ROUND_SIZE * DROP_RATIO, COL_DROP, 0.5 * a, Z.DROP);
+  at(-edge, 0, COL_INK_EDGE, 0.92 * a, Z.EDGE);
+  at(edge, 0, COL_INK_EDGE, 0.92 * a, Z.EDGE);
+  at(0, edge, COL_INK_EDGE, 0.92 * a, Z.EDGE);
+  at(0, -edge, COL_INK_EDGE, 0.92 * a, Z.EDGE);
+  at(0, 0, ACCENT_COUNT, a, Z.INK);
+};
+
 export const drawIntro = (
   out: InstanceWriter, frame: number, t: IntroTiming = DEFAULT_INTRO_TIMING,
+  round = 0,
 ): void => {
   const phase = introPhaseAt(frame, t);
   if (phase === IntroPhase.DONE) return;
+  drawRound(out, frame, round, t);
   if (phase !== IntroPhase.FADE && phase !== IntroPhase.HOLD) {
     drawBeat(out, phase, frame - introPhaseStart(phase, t), t);
   }
   drawFade(out, frame);   // last, and over the top of all of it
+};
+
+// -----------------------------------------------------------------------------
+// THE ROUND-WIN BANNER
+//
+// "PUKLLAQ N LLALLIN" — Quechua: player N wins. It uses the same stamp, band
+// and slam the countdown does, because a round being won and a round starting
+// are the same KIND of announcement and should read as one voice.
+// -----------------------------------------------------------------------------
+
+/** How long the banner takes to slam in, hold and leave. */
+export const WIN_BANNER_FRAMES = 90;
+const WIN_SIZE = 108;
+const WIN_TRACKING = 14;
+const COL_WIN = 0xffc93c;
+const COL_WIN_EDGE = 0x2a1c02;
+
+/** What the banner says. Exported so a test can read it without a GL context. */
+export const winBannerText = (playerNo: number): string => `PUKLLAQ ${playerNo} LLALLIN`;
+
+/**
+ * `frame` counts from the moment the round was won. Draws nothing once the
+ * banner is over, so a caller that keeps calling costs one comparison.
+ *
+ * The glyph slams in like a counted beat and releases the same way; the band
+ * behind it wipes open from the centre, as the countdown's does.
+ */
+export const drawRoundWin = (
+  out: InstanceWriter, frame: number, playerNo: number,
+): void => {
+  if (frame < 0 || frame >= WIN_BANNER_FRAMES || playerNo <= 0) return;
+  const shape = beatShape(frame, WIN_BANNER_FRAMES);
+  if (shape.alpha <= 0) return;
+
+  drawBand(out, shape.wipe, shape.alpha, COL_WIN);
+  drawStamp(out, {
+    text: winBannerText(playerNo),
+    size: WIN_SIZE * shape.scale,
+    tracking: WIN_TRACKING * shape.scale,
+    fill: COL_WIN,
+    edge: COL_WIN_EDGE,
+    alpha: shape.alpha,
+    bold: 0,
+  });
 };
