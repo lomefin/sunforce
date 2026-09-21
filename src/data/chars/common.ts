@@ -210,10 +210,10 @@ export const onHitOnly = (from: number, to: number, into: number): CancelRule =>
 export const BASE_PHYSICS: PhysicsDef = {
   walkF: 4.0,
   walkB: 3.4,
-  dashSpeed: 9.0,
-  dashFrames: 20,
-  backDashSpeed: 8.0,
-  backDashFrames: 22,
+  dashSpeed: 18.0,
+  dashFrames: 22,
+  backDashSpeed: 15.0,
+  backDashFrames: 20,
   // A step dash is the default; A and C run instead.
   runDash: false,
   jumpSquat: 4,

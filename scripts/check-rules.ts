@@ -1021,6 +1021,27 @@ import { animOfState } from '../src/gfx/renderer';
   };
   check('dash: covers well over twice a walk', cover(true) > cover(false) * 2, true);
 
+  // ...and it has to READ as a dash, not as a brisk step. Measured on the DASH
+  // STATE ALONE, so the taps that triggered it are not counted: a dash that
+  // moves an eighth of the screen is a move nobody can see happen.
+  const dashOnly = (id: CharId): number => {
+    const s = createState(3, id, CharId.A, StageId.STAGE_1, REGISTRY);
+    const f = s.fighter(0);
+    step(s, B.R, 0); step(s, 0, 0); step(s, B.R, 0);
+    let x0 = px(f.posX);
+    let started = false;
+    for (let i = 0; i < 60; i++) {
+      const dashing = f.state === S.DASH_F || f.state === S.DASH_B;
+      if (dashing && !started) { started = true; x0 = px(f.posX); }
+      if (started && !dashing) break;
+      step(s, 0, 0);
+    }
+    return Math.round(Math.abs(px(f.posX) - x0));
+  };
+  // The view is 1477 units across at full zoom, so 300 is a fifth of the screen.
+  check('dash: the dash state alone covers real ground', dashOnly(CharId.A) > 300, true);
+  check('dash: a Tinku goes further still', dashOnly(CharId.C) > dashOnly(CharId.A), true);
+
   // THE BANNERS. Quechua, and the number is the PLAYER, not the round.
   check('banner: the win banner speaks Quechua', winBannerText(1), 'PUKLLAQ 1 LLALLIN');
   check('banner: ...and names player two', winBannerText(2), 'PUKLLAQ 2 LLALLIN');

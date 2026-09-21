@@ -153,8 +153,8 @@ export const CHAR_F: CharDef = {
   },
   physics: {
     walkF: 4.0, walkB: 3.4,
-    dashSpeed: 9.0, dashFrames: 20,
-    backDashSpeed: 8.0, backDashFrames: 22,
+    dashSpeed: 18.0, dashFrames: 22,
+    backDashSpeed: 15.0, backDashFrames: 20,
     runDash: true,
     // THE LONGEST JUMP ON THE ROSTER. Virtud is DRAWN with wings — they are in
     // the art already, nothing here adds them or makes her fly — so hers is the

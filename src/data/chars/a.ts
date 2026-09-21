@@ -157,8 +157,8 @@ export const CHAR_A: CharDef = {
   },
   physics: {
     walkF: 4.0, walkB: 3.4,
-    dashSpeed: 9.0, dashFrames: 20,
-    backDashSpeed: 8.0, backDashFrames: 22,
+    dashSpeed: 18.0, dashFrames: 22,
+    backDashSpeed: 15.0, backDashFrames: 20,
     runDash: true,
     jumpSquat: 4, jumpVelY: 24.2, jumpVelXF: 5.0, jumpVelXB: 4.4,
     gravity: 1.10, airDrag: 1.0, groundFriction: 0.84,

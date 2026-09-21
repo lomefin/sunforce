@@ -196,6 +196,12 @@ The dash has no art of its own and borrows the WALK cycle run fast. Without a
 `DASH_F`/`DASH_B` clip the sheet falls back to **IDLE**, which made the move
 look like it had not happened at all.
 
+**It has to cover real ground or nobody sees it happen.** 18 u/f over 22 frames
+is ~345 units for a baseline character — about four times a walk of the same
+length, and a quarter of the 1477-unit view at full zoom. `npm run check`
+measures the DASH STATE ALONE, excluding the taps that triggered it, because
+that is the number that reads on screen.
+
 The HUD shows aura as a slim gold bar under the health, with a notch at the dash
 threshold — so the gate is something you can see rather than discover by
 pressing.
