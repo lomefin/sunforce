@@ -19,6 +19,7 @@ import type {
 import type { Material } from '@/gfx/batch';
 import { AURA_DASH_MIN, AURA_SCALE, AnimId, Bone, MoveId, S } from '@/core/contracts';
 import { charOf } from '@/sim/state';
+import { isAirborne } from '@/sim/collision';
 import { px } from '@/core/fixed';
 import { QuadBatch, rgbB, rgbG, rgbR, writeQuad } from '@/gfx/batch';
 import { drawDebugBoxes, toggleDebugBoxes as flipDebugBoxes } from '@/gfx/debugdraw';
@@ -106,7 +107,10 @@ const STATE_ANIM: Readonly<Record<number, StateAnim>> = {
   [S.BLOCKSTUN_AIR]: AnimId.BLOCK_AIR,
   [S.KNOCKDOWN]: AnimId.KNOCKDOWN,
   [S.WAKEUP]: AnimId.WAKEUP,
-  [S.KO]: AnimId.KO,
+  // THE KO IS TWO POSES. `-ko` is the fighter in the air, thrown backwards by
+  // the killing blow; `-fallen` is what it lands in. One state, and which
+  // drawing it wears depends on whether the feet are still off the ground.
+  [S.KO]: (f: FighterView): AnimId => (isAirborne(f) ? AnimId.KO : AnimId.KNOCKDOWN),
   [S.WIN_POSE]: AnimId.WIN,
   [S.INTRO]: AnimId.INTRO,
 };

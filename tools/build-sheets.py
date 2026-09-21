@@ -321,10 +321,17 @@ def build(costume, clips):
     # which reads as "floored" far better than standing there in neutral.
     ko = series('ko') or hard or soft or ['neutral']
     kod = spread(KO_CLIP_FRAMES, len(ko))
+
+    # ...and what it lands in. The KO is TWO poses: `-ko` in the air, `-fallen`
+    # on the floor. A costume with no `-fallen` keeps wearing its KO pose after
+    # it lands, which is wrong but not broken.
+    fallen = series('fallen') or ko
+    falld = spread(KO_CLIP_FRAMES, len(fallen))
     hit_soft = [fr(n, d) for n, d in zip(soft, softd)]
     clipset = {
       "IDLE":       {"loopAt":0,  "frames":[fr(n,d) for n,d in zip(idle, idled)]},
       "KO":         {"loopAt":-1, "frames":[fr(n,d) for n,d in zip(ko, kod)]},
+      "KNOCKDOWN":  {"loopAt":-1, "frames":[fr(n,d) for n,d in zip(fallen, falld)]},
       "WALK_F":     {"loopAt":0,  "frames":[fr(n,wdur) for n in walk]},
       "WALK_B":     {"loopAt":0,  "frames":[fr(n,wdur+1) for n in reversed(walk)]},
       "DASH_F":     {"loopAt":0,  "frames":[fr(n,ddur) for n in walk]},
@@ -466,7 +473,8 @@ def main():
         'soft-hit': 'HIT_STAND (punch reaction)',
         'hard-hit': 'HIT_STAND_HARD (kick reaction)',
         'block':    'BLOCK_STAND / BLOCK_CROUCH / BLOCK_AIR',
-        'ko':       'KO (the floored pose)',
+        'ko':       'KO (thrown, in the air)',
+        'fallen':   'KNOCKDOWN (where the KO lands)',
     }
     print('\ncoverage — drawings present per costume:')
     for costume in sorted(groups):

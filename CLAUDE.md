@@ -212,8 +212,13 @@ killing blow **cancels the remaining hitstun** rather than waiting it out: a
 corpse does not finish its flinch, and the whole arc has to land inside
 `KO_SLOWMO_FRAMES` or the round ends mid-flight.
 
-Art is `<costume>-ko.png`, built into a held (never looped) `KO` clip. A costume
-without one falls back to its heaviest hit reaction.
+**The KO is two poses.** `<costume>-ko.png` is the fighter in the air, thrown
+backwards by the killing blow; `<costume>-fallen.png` is what it lands in. One
+state, `S.KO`, and which drawing it wears is decided by whether the feet are
+still off the ground — `STATE_ANIM` entries may be functions, which is what that
+is for. Both clips are held, never looped. A costume missing `-ko` falls back to
+its heaviest hit reaction; one missing `-fallen` keeps wearing its KO pose after
+landing, which is wrong but not broken.
 
 ## What the overlay says
 
