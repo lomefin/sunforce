@@ -60,6 +60,10 @@ SOFT_HITSTUN, HARD_HITSTUN = 16, 21
 # the LONGER of the two and holds (loopAt -1), so a blocked punch simply ends
 # early rather than the drawing running out under a blocked kick.
 BLOCKSTUN = 14
+# The KO pose is HELD (loopAt -1), so this is only how long its drawings take to
+# play through if a costume ever has more than one. KO_SLOWMO_FRAMES from
+# contracts.ts is the span it has to cover, and the sim runs it at 30% speed.
+KO_CLIP_FRAMES = 45
 # THE IDLE BREATH, in sim frames for one full cycle. A fighting game's rest pose
 # is never still. A full second read as sluggish on four drawings, so this is
 # two thirds of one: brisk enough to look alive, slow enough not to jitter.
@@ -303,9 +307,17 @@ def build(costume, clips):
     # BLOCKSTUN_*); it just had no art until now, so it rendered as IDLE.
     block = series('block') or soft or ['neutral']
     blockd = spread(BLOCKSTUN, len(block))
+
+    # THE KO POSE. Held, never looped: the fighter is launched backwards and
+    # lands in it, and it is the last thing on screen before the round ends.
+    # A costume with no `-ko` drawing falls back to its heaviest reaction,
+    # which reads as "floored" far better than standing there in neutral.
+    ko = series('ko') or hard or soft or ['neutral']
+    kod = spread(KO_CLIP_FRAMES, len(ko))
     hit_soft = [fr(n, d) for n, d in zip(soft, softd)]
     clipset = {
       "IDLE":       {"loopAt":0,  "frames":[fr(n,d) for n,d in zip(idle, idled)]},
+      "KO":         {"loopAt":-1, "frames":[fr(n,d) for n,d in zip(ko, kod)]},
       "WALK_F":     {"loopAt":0,  "frames":[fr(n,wdur) for n in walk]},
       "WALK_B":     {"loopAt":0,  "frames":[fr(n,wdur+1) for n in reversed(walk)]},
       "JUMP_SQUAT": {"loopAt":-1, "frames":[fr('neutral',1)]},
@@ -445,6 +457,7 @@ def main():
         'soft-hit': 'HIT_STAND (punch reaction)',
         'hard-hit': 'HIT_STAND_HARD (kick reaction)',
         'block':    'BLOCK_STAND / BLOCK_CROUCH / BLOCK_AIR',
+        'ko':       'KO (the floored pose)',
     }
     print('\ncoverage — drawings present per costume:')
     for costume in sorted(groups):

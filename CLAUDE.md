@@ -187,6 +187,25 @@ The HUD shows aura as a slim gold bar under the health, with a notch at the dash
 threshold — so the gate is something you can see rather than discover by
 pressing.
 
+## The KO
+
+The losing fighter is **thrown backwards and up** as it dies, lands in the KO
+pose, and the whole sequence plays at `KO_TIMESCALE_PCT` (30%) for
+`KO_SLOWMO_FRAMES` (60 sim frames, so about 3.3 seconds of wall clock).
+
+The slow motion is **presentation, not simulation**: `setTimeScalePct` scales
+the loop's accumulator, so the sim runs its normal frames in its normal order
+and stays bit-identical. Everything a test measures about a KO is in sim frames.
+
+The launch is scaled by the victim's own weight exactly as knockback is — a
+Tinku reaches a 135-unit apex over 31 frames, Diablo only 77 over 23. The
+killing blow **cancels the remaining hitstun** rather than waiting it out: a
+corpse does not finish its flinch, and the whole arc has to land inside
+`KO_SLOWMO_FRAMES` or the round ends mid-flight.
+
+Art is `<costume>-ko.png`, built into a held (never looped) `KO` clip. A costume
+without one falls back to its heaviest hit reaction.
+
 ## The clash
 
 Two strikes landing on the **same frame** cancel: neither fighter takes damage

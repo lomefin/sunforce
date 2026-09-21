@@ -38,7 +38,7 @@
 import {
   AURA_COST_DASH, AURA_COST_KICK, AURA_COST_PUNCH, AURA_DASH_MIN, AURA_SCALE,
   B, Contact, DASH_MIN_MOVEMENT, DOUBLE_TAP_FRAMES, Ev, FF, G, INPUT_LENIENCY,
-  MF, MoveId, RoundState, S, SfxId,
+  KO_LAUNCH_X, KO_LAUNCH_Y, MF, MoveId, RoundState, S, SfxId,
 } from '@/core/contracts';
 import type {
   ButtonMask, CompiledMove, FighterView, GroupMask, PlayerIx, SimState,
@@ -47,6 +47,7 @@ import { On } from '@/core/contracts';
 import {
   ringConsume, ringConsumed, ringFindPress, ringHeld, ringPressEdge, ringReleaseEdge,
 } from '@/core/ring';
+import { fx, fxPct } from '@/core/fixed';
 import { charOf, otherPlayer } from '@/sim/state';
 import { currentFrame, isAirborne, moveOf, pushBoxOf } from '@/sim/collision';
 import { endCombo } from '@/sim/hits';
@@ -536,18 +537,35 @@ const toNeutral = (s: SimState, p: PlayerIx): void => {
 export const resolveTransitions = (s: SimState, p: PlayerIx): void => {
   const f = s.fighter(p);
 
-  // --- 0. the round is not running ------------------------------------------
-  if (s.g.roundState !== RoundState.FIGHT) return;
+  // --- 0. THE KO, and it comes BEFORE the round-state guard below on purpose.
+  //        `g.roundState` flips to KO on the very frame the killing hit lands,
+  //        while the victim is still in hitstop — so a guard-first order made
+  //        S.KO literally unreachable and the state was dead code.
+  //
+  //        The killing blow THROWS you: the remaining hitstun is cancelled
+  //        rather than waited out, because a corpse does not finish its flinch
+  //        and because the whole sequence has to fit inside KO_SLOWMO_FRAMES.
+  //        Hitstop is still honoured, so the impact freeze reads first.
+  if (f.hp <= 0 && f.hitstop === 0 && f.state !== S.KO) {
+    f.hitstun = 0;
+    f.blockstun = 0;
+    releaseAction(s, p);
+    setState(f, S.KO);
 
-  // --- 1. KO. The knockback plays out first: a fighter killed mid-hitstun
-  //        still flies, and only then locks into the KO pose. -----------------
-  if (f.hp <= 0 && f.hitstun === 0) {
-    if (f.state !== S.KO) {
-      releaseAction(s, p);
-      setState(f, S.KO);
-    }
+    // THE LAUNCH: backwards and up, scaled by the victim's own weight exactly
+    // as knockback is, so a Diablo goes down heavily and a Tinku is flung.
+    // Physics owns the arc and the landing from here; S.KO is terminal and
+    // drives no velocity of its own, so nothing overwrites this.
+    const w = charOf(s, p).weightPct;
+    f.velX = -fxPct(fx(KO_LAUNCH_X), w) * f.facing;
+    f.velY = fxPct(fx(KO_LAUNCH_Y), w);
+    f.flags |= FF.AIRBORNE;
     return;
   }
+  if (f.state === S.KO) return;      // terminal until resetRound
+
+  // --- 1. the round is not running ------------------------------------------
+  if (s.g.roundState !== RoundState.FIGHT) return;
 
   // --- 2. forced stun. hits.commit already chose the flavour (stand, crouch
   //        or air); this only repairs a state that is not a stun state at all.
@@ -655,10 +673,6 @@ export const resolveTransitions = (s: SimState, p: PlayerIx): void => {
       setState(f, S.STAND);
       if (tryStartMove(s, p, null)) return;
       groundMovement(s, p);
-      return;
-
-    case S.KO:
-      // Terminal until resetRound. sim/round.ts owns the victory sequence.
       return;
 
     default:

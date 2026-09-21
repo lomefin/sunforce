@@ -47,10 +47,11 @@
 // and ignored.
 // =============================================================================
 
-import { B, LOGICAL_H, LOGICAL_W } from '@/core/contracts';
+import { B, KO_TIMESCALE_PCT, LOGICAL_H, LOGICAL_W, RoundState } from '@/core/contracts';
 import type {
   ButtonMask, InputSource, InstanceWriter, MatchConfig, Renderer, Scene,
 } from '@/core/contracts';
+import { setTimeScalePct } from '@/core/loop';
 import { QuadBatch, orthoMat3 } from '@/gfx/batch';
 import { createSelect } from '@/ui/select';
 import type { SelectController } from '@/ui/select';
@@ -284,6 +285,15 @@ class FightScene implements Scene {
     // pose and the HUD all play out; we just leave before the sim's own
     // MATCH_END expires into a rematch nobody asked for.
     m.advance(sources, frame);
+
+    // KO SLOW MOTION. The loop's accumulator, not the sim: the same frames at
+    // 30% of the rate, so the launched fighter's arc plays out over about two
+    // and a half seconds and the simulation stays bit-identical. Driven off
+    // the round state every frame rather than latched on the edge, so any
+    // route out of KO — round end, rematch, '[' to the menu — restores full
+    // speed without needing to remember to.
+    setTimeScalePct(m.state.g.roundState === RoundState.KO ? KO_TIMESCALE_PCT : 100);
+
     if (!this.endWatch.over(m.state)) return null;
     return createSelectScene(this.deps, m.cfg, this.mode);
   }
@@ -304,6 +314,8 @@ class FightScene implements Scene {
     this.overlay = null;
     // Leave no troupe's backdrop behind for the next fight to inherit.
     this.deps.renderer.setStageDressing?.(null);
+    // ...and never leave a menu running at a third of speed.
+    setTimeScalePct(100);
   }
 }
 

@@ -1441,8 +1441,24 @@ export const AIR_VS_AIR_PUSH = false;
 /** Round. */
 export const ROUND_TIME = 90;
 export const ROUNDS_TO_WIN = 2;
-export const KO_SLOWMO_FRAMES = 45;
+/** Sim frames the KO sequence holds before the round ends. At
+ *  KO_TIMESCALE_PCT they take 45 / 0.30 = 150 real frames, about 2.5 seconds. */
+export const KO_SLOWMO_FRAMES = 60;
+/** The loop's accumulator runs at this percentage during a KO. */
 export const KO_TIMESCALE_PCT = 30;
+
+/**
+ * THE KO LAUNCH. The losing fighter is thrown backwards and up as it dies —
+ * on top of whatever knockback killed it, which has already played out by then.
+ * World units per frame, scaled by the victim's own weight exactly as knockback
+ * is, so a Diablo goes down heavily and a Tinku is flung.
+ *
+ * 15.0 against gravity 1.10 is a 102-unit arc over 27 frames, which finishes
+ * comfortably inside KO_SLOWMO_FRAMES — the fighter lands before the round ends
+ * rather than being cut off mid-flight.
+ */
+export const KO_LAUNCH_X = 9.0;
+export const KO_LAUNCH_Y = 15.0;
 
 /** Camera. */
 export const CAM_MIN_ZOOM = 0.80;

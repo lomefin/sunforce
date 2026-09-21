@@ -2,7 +2,7 @@
 // The sim is pure over (state, inputs), so it runs fine with no browser at all.
 import {
   AURA_COST_BLOCK, AURA_COST_DASH, AURA_COST_KICK, AURA_COST_PUNCH, AURA_DASH_MIN,
-  AURA_SCALE, B, CharId, MoveId, S, StageId, WALL_PAD,
+  AURA_SCALE, B, CharId, KO_SLOWMO_FRAMES, MoveId, RoundState, S, StageId, WALL_PAD,
 } from '../src/core/contracts';
 import { fx, px } from '../src/core/fixed';
 import { charOf, createState } from '../src/sim/state';
@@ -917,6 +917,72 @@ import { animOfState } from '../src/gfx/renderer';
     check('aura: the unconsumed press fires as soon as it can be paid for',
       f.action !== MoveId.NONE, true);
   }
+}
+
+// =============================================================================
+// THE KO — flying backwards, then down
+// -----------------------------------------------------------------------------
+// The losing fighter is thrown backwards and up as it dies and lands in the KO
+// pose, with the whole sequence played at KO_TIMESCALE_PCT by the loop. The
+// slow motion is presentation — the SIM runs its normal frames — so everything
+// here is measured in sim frames.
+{
+  const die = (loser: CharId) => {
+    const s = createState(7, CharId.E, loser, StageId.STAGE_1, REGISTRY);
+    s.fighter(0).posX = fx(1780);
+    s.fighter(1).posX = fx(1820);
+    s.fighter(0).facing = 1;
+    s.fighter(1).facing = -1;
+    s.fighter(1).hp = 40;                      // one kick from gone
+    const d = s.fighter(1);
+    let koAt = -1;
+    let apex = 0;
+    let air = 0;
+    let landedAt = -1;
+    let roundEnd = -1;
+    for (let i = 0; i < 200; i++) {
+      step(s, i === 0 ? B.K : 0, 0);
+      if (koAt < 0 && d.state === S.KO) koAt = i;
+      if (koAt >= 0) {
+        const y = px(d.posY);
+        if (y > apex) apex = y;
+        if (y > 0) air++;
+        else if (landedAt < 0 && air > 0) landedAt = i - koAt;
+      }
+      if (roundEnd < 0 && s.g.roundState === RoundState.ROUND_END) roundEnd = i;
+    }
+    return { koAt, apex: Math.round(apex), air, landedAt, roundEnd };
+  };
+
+  const tinku = die(CharId.C);
+  const virtud = die(CharId.F);
+  const diablo = die(CharId.E);
+
+  // S.KO WAS UNREACHABLE before this: `g.roundState` flips to KO on the frame
+  // the killing hit lands, and the fighter ladder returned early on anything
+  // but FIGHT — so the state existed and nothing could ever enter it. This is
+  // the check that says it is wired at all.
+  // (Checked at the MOMENT it happens: by frame 200 the round has ended and
+  // reset, so the fighter is standing again and a final-state read says STAND.)
+  check('ko: the loser actually reaches the KO state', virtud.koAt >= 0, true);
+  check('ko: ...and does so once hitstop has played out', virtud.koAt > 0, true);
+
+  // It is a LAUNCH, not a slump: up, and backwards.
+  check('ko: the loser is thrown into the air', virtud.apex > 0, true);
+  check('ko: ...and comes back down', virtud.landedAt > 0, true);
+
+  // Weight decides how far: mass resists the same throw, so the heavy barely
+  // leaves the floor and the light one is flung.
+  check('ko: a Tinku flies higher than Virtud', tinku.apex > virtud.apex, true);
+  check('ko: ...and Virtud higher than Diablo', virtud.apex > diablo.apex, true);
+  check('ko: Diablo goes down heavily', diablo.apex < tinku.apex * 0.7, true);
+
+  // THE SEQUENCE HAS TO FIT. If the round ended while the body was still in
+  // the air the KO would read as a cut, not a finish.
+  check('ko: the loser lands before the round ends',
+    virtud.koAt + virtud.landedAt < virtud.roundEnd, true);
+  check('ko: the slowest of the three still lands in time',
+    Math.max(tinku.landedAt, virtud.landedAt, diablo.landedAt) < KO_SLOWMO_FRAMES, true);
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
