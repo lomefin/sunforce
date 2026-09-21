@@ -42,6 +42,10 @@ over 200 frames, pushbox separation and wall clamping.
 **No numpad anywhere** — the bindings must work on a laptop / tenkeyless keyboard. Each
 player's attacks sit under the hand already resting on their movement keys.
 
+`[` opens the mode screen from a fight. **`]` re-rolls the CPU opponent** on the
+1P character select — player one's own cursor is carried across, so a re-roll
+never costs you the fighter you had already chosen.
+
 **Guard already has a key** — `G` for P1, `P` for P2 — and holding BACK also
 guards (`sim/hits.ts` derives `blockHeld` from either). Blocking is fully
 implemented; it is simply not advertised anywhere on the fight screen.
@@ -229,6 +233,24 @@ landing, which is wrong but not broken.
   taken. Latched on the rising edge of the round score, not polled off the round
   state, because a round can be won by a KO **or** by the clock and both routes
   bump exactly one counter.
+
+## The celebration
+
+The winner enters `S.WIN_POSE` while the round is counted out, chosen by having
+strictly more HP than the other — right for a KO (the loser is at 0) and for a
+timeout (decided on health). **A double KO leaves them equal and neither
+celebrates**, which is the correct answer to "who won that".
+
+Art is `<costume>-win-1.png`, `-win-2.png`, and the troupe decides how it plays:
+
+| troupe | | |
+|---|---|---|
+| Caporal | `hold` | frame 1 for a beat, then frame 2 and stay |
+| Tinku | `loop` | alternate between the two |
+| Diablada | `hold` | (no art yet — holds neutral) |
+
+That table is `WIN_STYLE` in the builder. A troupe not listed holds, because a
+held pose can look stiff but a looped one can look broken.
 
 ## The clash
 

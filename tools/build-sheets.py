@@ -69,6 +69,17 @@ KO_CLIP_FRAMES = 45
 # and rendering it as IDLE (which is what a missing clip falls back to) made the
 # move look like it had not happened at all.
 DASH_CLIP_FRAMES = 20
+# THE CELEBRATION, and its two shapes. A Caporal strikes one pose and settles
+# into a second; a Tinku keeps swapping between them. So the clip is the same
+# drawings either way and only `loopAt` and the pacing differ, keyed on the
+# troupe the costume belongs to. A troupe not listed here holds, which is the
+# safer default: a held pose can look stiff, a looped one can look broken.
+WIN_CLIP_FRAMES = 96
+WIN_STYLE = {
+    'caporal':  'hold',   # frame 1, a beat, then frame 2 and stay there
+    'tinku':    'loop',   # back and forth between the two
+    'diablada': 'hold',
+}
 # THE IDLE BREATH, in sim frames for one full cycle. A fighting game's rest pose
 # is never still. A full second read as sluggish on four drawings, so this is
 # two thirds of one: brisk enough to look alive, slow enough not to jitter.
@@ -327,11 +338,26 @@ def build(costume, clips):
     # it lands, which is wrong but not broken.
     fallen = series('fallen') or ko
     falld = spread(KO_CLIP_FRAMES, len(fallen))
+
+    # THE WINNER'S POSE. No art -> it keeps standing in neutral, which is a
+    # non-celebration rather than a broken one.
+    win = series('win') or ['neutral']
+    style = WIN_STYLE.get(costume.split('-')[-1], 'hold')
+    if style == 'loop':
+        # Evenly split, looping: the two poses alternate for as long as it shows.
+        wind = spread(WIN_CLIP_FRAMES, len(win))
+        win_loop = 0
+    else:
+        # Hold: the FIRST pose gets a beat, the last one gets the rest and stays.
+        beat = max(6, WIN_CLIP_FRAMES // (len(win) * 3))
+        wind = [beat] * (len(win) - 1) + [max(1, WIN_CLIP_FRAMES - beat * (len(win) - 1))]
+        win_loop = -1
     hit_soft = [fr(n, d) for n, d in zip(soft, softd)]
     clipset = {
       "IDLE":       {"loopAt":0,  "frames":[fr(n,d) for n,d in zip(idle, idled)]},
       "KO":         {"loopAt":-1, "frames":[fr(n,d) for n,d in zip(ko, kod)]},
       "KNOCKDOWN":  {"loopAt":-1, "frames":[fr(n,d) for n,d in zip(fallen, falld)]},
+      "WIN":        {"loopAt":win_loop, "frames":[fr(n,d) for n,d in zip(win, wind)]},
       "WALK_F":     {"loopAt":0,  "frames":[fr(n,wdur) for n in walk]},
       "WALK_B":     {"loopAt":0,  "frames":[fr(n,wdur+1) for n in reversed(walk)]},
       "DASH_F":     {"loopAt":0,  "frames":[fr(n,ddur) for n in walk]},
@@ -475,6 +501,7 @@ def main():
         'block':    'BLOCK_STAND / BLOCK_CROUCH / BLOCK_AIR',
         'ko':       'KO (thrown, in the air)',
         'fallen':   'KNOCKDOWN (where the KO lands)',
+        'win':      'WIN (the celebration)',
     }
     print('\ncoverage — drawings present per costume:')
     for costume in sorted(groups):

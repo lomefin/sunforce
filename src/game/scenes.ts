@@ -52,6 +52,7 @@ import type {
   ButtonMask, InputSource, InstanceWriter, MatchConfig, Renderer, Scene,
 } from '@/core/contracts';
 import { setTimeScalePct } from '@/core/loop';
+import { SELECTABLE_CHARS } from '@/data/registry';
 import { QuadBatch, orthoMat3 } from '@/gfx/batch';
 import { createSelect } from '@/ui/select';
 import type { SelectController } from '@/ui/select';
@@ -93,6 +94,20 @@ export const consumeSelectRequest = (): boolean => {
 /** Is a press pending? For a test or an overlay. Does NOT clear the latch. */
 export const selectRequested = (): boolean => requested;
 
+/** ']' — "draw me a different opponent". Only the 1P select screen reads it. */
+let rerollWanted = false;
+
+export const requestReroll = (): void => {
+  rerollWanted = true;
+};
+
+/** True at most ONCE per press: reading it clears the latch. */
+export const consumeRerollRequest = (): boolean => {
+  if (!rerollWanted) return false;
+  rerollWanted = false;
+  return true;
+};
+
 /** Listen for '['. Returns the detach function; calling it twice is safe, and a
  *  second attach while one is live returns the existing detach rather than
  *  stacking a second listener. `code` is the physical key the user pressed;
@@ -106,6 +121,11 @@ export const attachSelectHotkey = (
   const handler = (ev: Event): void => {
     const e = ev as KeyboardEvent;
     if (e.repeat) return;
+    if (e.code === 'BracketRight' || e.key === ']') {
+      e.preventDefault();
+      rerollWanted = true;
+      return;
+    }
     if (e.code !== 'BracketLeft' && e.key !== '[') return;
     e.preventDefault();
     requested = true;
@@ -116,6 +136,7 @@ export const attachSelectHotkey = (
     target.removeEventListener('keydown', handler);
     if (detachFn === off) detachFn = null;
     requested = false;
+    rerollWanted = false;
   };
   detachFn = off;
   return off;
@@ -455,11 +476,14 @@ class SelectScene extends MenuScene {
   private screen: SelectController | null = null;
   /** 1P: has the synthetic PUNCH that locks player 2 been spent yet? */
   private soloLocked = false;
+  /** The config in force. Re-rolling replaces it, so it cannot be `cfg`. */
+  private live: MatchConfig | null = null;
 
   protected override open(): void {
     // `cfg` arrived through `configForMode`, so in 1P player 2's slot already
     // holds the drawn opponent and this puts the second cursor straight on it.
-    this.screen = createSelect(this.deps.registry, this.cfg);
+    this.live = this.cfg;
+    this.screen = createSelect(this.deps.registry, this.live);
     this.soloLocked = false;
   }
 
@@ -486,6 +510,12 @@ class SelectScene extends MenuScene {
 
     if (consumeSelectRequest()) return this.cancel();   // '[' again = back out.
 
+    // ']' — DRAW ME A DIFFERENT ONE. Only in 1P: in 2P the second player picks
+    // for themselves and there is nothing to re-roll. Player one's own cursor
+    // is carried across, because re-rolling the opponent must not cost you the
+    // fighter you had already chosen.
+    if (solo && consumeRerollRequest()) this.reroll(s);
+
     const in1 = solo ? this.soloMask() : pad1;
 
     // GUARD un-locks inside the screen, so it is a CANCEL only when there is
@@ -505,7 +535,7 @@ class SelectScene extends MenuScene {
     // Both locked in: the new characters take effect immediately. `result`
     // spreads the config it is handed, so the mode, the seed and the CPU's
     // options all survive into the fight.
-    const picked = s.result(this.cfg);
+    const picked = s.result(this.live ?? this.cfg);
     return picked === null ? null : createFightScene(this.deps, picked, this.mode);
   }
 
@@ -514,6 +544,25 @@ class SelectScene extends MenuScene {
    *  `createSelect` put it — the character `configForMode` drew — and neutral
    *  after it means the cursor can never move off it and never unlock, because
    *  ui/select.ts only ever acts on edges. */
+  /**
+   * A fresh opponent, on the same screen. `configForMode` advances the seed and
+   * draws again, so a second press gives a second answer; player one's CURRENT
+   * cursor is written in first so the draw cannot undo their choice.
+   *
+   * The screen is rebuilt rather than nudged: the second cursor is locked, and
+   * ui/select.ts only moves on input edges, so there is no way to steer a
+   * locked cursor from the outside. Rebuilding also re-arms `soloMask`, which
+   * is what locks the new pick.
+   */
+  private reroll(s: SelectController): void {
+    const base = this.live ?? this.cfg;
+    const p1 = SELECTABLE_CHARS[s.model.cursor[0]] ?? base.chars[0];
+    const next = configForMode({ ...base, chars: [p1, base.chars[1]] }, ONE_PLAYER);
+    this.live = next;
+    this.screen = createSelect(this.deps.registry, next);
+    this.soloLocked = false;
+  }
+
   private soloMask(): ButtonMask {
     if (this.soloLocked) return 0;
     this.soloLocked = true;

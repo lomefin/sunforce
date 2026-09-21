@@ -564,6 +564,30 @@ export const resolveTransitions = (s: SimState, p: PlayerIx): void => {
   }
   if (f.state === S.KO) return;      // terminal until resetRound
 
+  // --- 0b. THE WINNER CELEBRATES while the round is counted out. Also before
+  //         the guard below, and for the same reason S.KO is: by the time a
+  //         round has been won `g.roundState` has already left FIGHT, so
+  //         anything downstream of that guard can never run. S.WIN_POSE was
+  //         dead code exactly like S.KO was — `AnimId.WIN` was mapped and
+  //         nothing ever entered the state.
+  //
+  //         WHO. Strictly more HP than the other, which is right for both
+  //         routes: a KO leaves the loser at 0, and a timeout is decided on
+  //         health. A double KO leaves them equal and NEITHER celebrates,
+  //         which is the correct answer to "who won that".
+  if (s.g.roundState === RoundState.KO || s.g.roundState === RoundState.ROUND_END) {
+    const foe = s.fighter(otherPlayer(p));
+    if (f.hp > foe.hp && !isAirborne(f)) {
+      if (f.state !== S.WIN_POSE) {
+        releaseAction(s, p);
+        setState(f, S.WIN_POSE);
+        f.velX = 0;
+      }
+      return;
+    }
+  }
+  if (f.state === S.WIN_POSE) return;   // terminal until resetRound
+
   // --- 1. the round is not running ------------------------------------------
   if (s.g.roundState !== RoundState.FIGHT) return;
 

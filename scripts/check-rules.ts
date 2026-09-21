@@ -1049,5 +1049,67 @@ import { animOfState } from '../src/gfx/renderer';
   }
 }
 
+// =============================================================================
+// THE WINNER CELEBRATES
+// -----------------------------------------------------------------------------
+// S.WIN_POSE was dead code in exactly the way S.KO was: `AnimId.WIN` was mapped
+// in the renderer and nothing in the sim ever entered the state, because by the
+// time a round is won `g.roundState` has left FIGHT and the fighter ladder
+// returns early on anything else.
+{
+  const finish = (winner: CharId, loser: CharId) => {
+    const s = createState(7, winner, loser, StageId.STAGE_1, REGISTRY);
+    s.fighter(0).posX = fx(1780);
+    s.fighter(1).posX = fx(1820);
+    s.fighter(0).facing = 1;
+    s.fighter(1).facing = -1;
+    s.fighter(1).hp = 40;
+    let winAt = -1;
+    let loserCelebrated = false;
+    for (let i = 0; i < 120; i++) {
+      step(s, i === 0 ? B.K : 0, 0);
+      if (winAt < 0 && s.fighter(0).state === S.WIN_POSE) winAt = i;
+      if (s.fighter(1).state === S.WIN_POSE) loserCelebrated = true;
+    }
+    return { winAt, loserCelebrated };
+  };
+
+  const r = finish(CharId.A, CharId.C);
+  check('win: the winner reaches the win pose', r.winAt >= 0, true);
+  check('win: the loser never does', r.loserCelebrated, false);
+
+  // A DOUBLE KO is nobody's win. Equal HP means neither qualifies, which is the
+  // right answer rather than an arbitrary slot-order tiebreak.
+  {
+    const s = createState(7, CharId.A, CharId.A, StageId.STAGE_1, REGISTRY);
+    s.fighter(0).hp = 0;
+    s.fighter(1).hp = 0;
+    let anyone = false;
+    for (let i = 0; i < 90; i++) {
+      step(s, 0, 0);
+      if (s.fighter(0).state === S.WIN_POSE || s.fighter(1).state === S.WIN_POSE) anyone = true;
+    }
+    check('win: a double KO has no winner to celebrate', anyone, false);
+  }
+
+  // THE TWO SHAPES OF CELEBRATION, read off the built sheets: a Caporal strikes
+  // a pose and settles into a second, a Tinku keeps swapping between them.
+  if (!existsSync('public/art/a.sheet.json')) {
+    console.log('SKIP  win: sheets not built — run `npm run sheets`');
+  } else {
+    const winClip = (slot: string) => {
+      const d = JSON.parse(readFileSync(`public/art/${slot}.sheet.json`, 'utf8')) as
+        { clips: Record<string, { loopAt: number; frames: { dur: number }[] }> };
+      return d.clips.WIN!;
+    };
+    const cap = winClip('a');
+    const tin = winClip('d');
+    check('win: a Caporal holds its final pose', cap.loopAt, -1);
+    check('win: ...after a beat on the first', cap.frames[0]!.dur < cap.frames[1]!.dur, true);
+    check('win: a Tinku loops between its poses', tin.loopAt, 0);
+    check('win: ...with the two evenly weighted', tin.frames[0]!.dur, tin.frames[1]!.dur);
+  }
+}
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
