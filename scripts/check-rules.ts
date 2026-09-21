@@ -2,8 +2,8 @@
 // The sim is pure over (state, inputs), so it runs fine with no browser at all.
 import {
   AURA_COST_BLOCK, AURA_COST_DASH, AURA_COST_KICK, AURA_COST_PUNCH, AURA_DASH_MIN,
-  AURA_SCALE, B, CharId, DOUBLE_TAP_FRAMES, KO_SLOWMO_FRAMES, MoveId, RoundState,
-  S, StageId, WALL_PAD,
+  AURA_SCALE, B, CharId, DOUBLE_TAP_FRAMES, KO_SLOWMO_FRAMES, MoveId, ROUNDS_TO_WIN,
+  RoundState, S, StageId, WALL_PAD,
 } from '../src/core/contracts';
 import { winBannerText } from '../src/ui/intro';
 import { createCpuSource } from '../src/input/cpu';
@@ -1141,6 +1141,37 @@ import { animOfState } from '../src/gfx/renderer';
     check('win: a Tinku loops between its poses', tin.loopAt, 0);
     check('win: ...with the two evenly weighted', tin.frames[0]!.dur, tin.frames[1]!.dur);
   }
+}
+
+// =============================================================================
+// ROUNDS 2 AND 3 OPEN INSIDE THE SIM
+// -----------------------------------------------------------------------------
+// The fight scene is entered ONCE per match; `startNextRound` runs inside the
+// simulation. So the countdown in `enter()` is seen exactly once, and "ROUND 2"
+// never appeared — the scene has to watch `g.roundNo` to know a round opened.
+// This asserts the signal it watches actually moves.
+{
+  const s = createState(11, CharId.E, CharId.C, StageId.STAGE_1, REGISTRY);
+  const seen: number[] = [s.g.roundNo];
+  let armed = false;
+  let matchOverAt = -1;
+  for (let i = 0; i < 4000; i++) {
+    if (s.g.roundState === RoundState.FIGHT) {
+      s.fighter(0).posX = fx(1780);
+      s.fighter(1).posX = fx(1820);
+      s.fighter(0).facing = 1;
+      s.fighter(1).facing = -1;
+      if (!armed) { s.fighter(1).hp = 60; armed = true; }   // one kick from gone
+    } else armed = false;
+    step(s, i % 30 === 0 ? B.K : 0, 0);
+    if (s.g.roundNo !== seen[seen.length - 1]) seen.push(s.g.roundNo);
+    if (s.g.matchOver === 1) { matchOverAt = i; break; }
+  }
+  check('rounds: the round number starts at 1', seen[0], 1);
+  check('rounds: a second round opens', seen.includes(2), true);
+  check('rounds: ...and the scene can see it as a change', seen.length > 1, true);
+  check('rounds: the match ends once someone takes two', matchOverAt >= 0, true);
+  check('rounds: ...to the winner', s.g.p0Wins, ROUNDS_TO_WIN);
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

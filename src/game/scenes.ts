@@ -59,8 +59,8 @@ import type { SelectController } from '@/ui/select';
 import { createModeSelect } from '@/ui/mode';
 import type { ModeController } from '@/ui/mode';
 import {
-  DEFAULT_INTRO_TIMING, INTRO_SYNC_WAIT_FRAMES, WIN_BANNER_FRAMES,
-  drawIntro, drawRoundWin, introTimingFor,
+  DEFAULT_INTRO_TIMING, INTRO_FADE_FRAMES, INTRO_SYNC_WAIT_FRAMES,
+  WIN_BANNER_FRAMES, drawIntro, drawRoundWin, introTimingFor,
 } from '@/ui/intro';
 import type { IntroTiming } from '@/ui/intro';
 import { stageForTroupe, themeForOpponent } from '@/data/troupes';
@@ -202,6 +202,9 @@ class FightScene implements Scene {
   /** Rounds scored so far, so a win is an EDGE and not a state to poll. */
   private lastScored = 0;
   private lastWins0 = 0;
+  /** The round the intro last played for. Rounds 2 and 3 open INSIDE the sim,
+   *  without re-entering this scene, so the countdown has to notice them. */
+  private lastRoundNo = 0;
 
   constructor(
     private readonly deps: GameDeps,
@@ -287,6 +290,7 @@ class FightScene implements Scene {
     this.endWatch.reset();
     this.lastScored = m.state.g.p0Wins + m.state.g.p1Wins;
     this.lastWins0 = m.state.g.p0Wins;
+    this.lastRoundNo = m.state.g.roundNo;
     this.winFrame = -1;
     this.winner = 0;
   }
@@ -346,6 +350,24 @@ class FightScene implements Scene {
       this.winFrame = 0;
     } else if (this.winFrame >= 0 && this.winFrame < WIN_BANNER_FRAMES) {
       this.winFrame++;
+    }
+
+    // A NEW ROUND OPENED. `startNextRound` happens inside the sim, so this
+    // scene is never re-entered and the countdown that runs in `enter()` would
+    // only ever be seen once — which is why "ROUND 2" and "ROUND 3" never
+    // appeared. Noticing the round number change replays it.
+    //
+    // TWO DIFFERENCES from the intro at the top of a match:
+    //   - It starts PAST the fade. A second curtain down between rounds is a
+    //     blackout nobody asked for; the stage is already there.
+    //   - It uses the DEFAULT timing, never the troupe's. `goAtMs` exists to
+    //     land GO on a track's downbeat, and by round two that track has been
+    //     playing for a minute — there is no downbeat left to catch.
+    if (m.state.g.roundNo !== this.lastRoundNo) {
+      this.lastRoundNo = m.state.g.roundNo;
+      this.introTiming = DEFAULT_INTRO_TIMING;
+      this.introFrame = INTRO_FADE_FRAMES;
+      this.introEnd = this.overlay === null ? 0 : this.introTiming.totalFrames;
     }
 
     if (!this.endWatch.over(m.state)) return null;

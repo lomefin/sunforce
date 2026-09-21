@@ -235,6 +235,13 @@ landing, which is wrong but not broken.
 - **"ROUND n"** rides above the countdown from the moment the black lifts until
   GO hands over. It fades rather than slams: the digits are the clock and want
   the eye, the round number is context.
+
+  Rounds 2 and 3 open **inside the sim** (`startNextRound`), so the fight scene
+  is never re-entered and the countdown in `enter()` would be seen exactly once.
+  The scene watches `g.roundNo` and replays it — starting PAST the fade, because
+  a second curtain between rounds is a blackout nobody asked for, and on the
+  DEFAULT timing, because `goAtMs` exists to catch a track's downbeat and by
+  round two that track has been playing for a minute.
 - **"PUKLLAQ n LLALLIN"** — Quechua for *player n wins* — stamps when a round is
   taken. Latched on the rising edge of the round score, not polled off the round
   state, because a round can be won by a KO **or** by the clock and both routes
